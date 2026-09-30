@@ -1,0 +1,209 @@
+package com.example.ui.student
+
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import com.example.data.firebase.FirebaseManager
+import com.example.localization.AppLanguage
+import com.example.localization.Translations
+import com.example.ui.admin.DashboardActionRow
+import com.example.ui.common.AppHeader
+import com.example.ui.common.StatCard
+import com.example.ui.theme.SchoolPrimary
+import com.example.ui.theme.SchoolSecondary
+import com.example.ui.theme.SchoolWarning
+
+@Composable
+fun StudentDashboardScreen(
+    firebaseManager: FirebaseManager,
+    currentLanguage: AppLanguage,
+    onLanguageChange: (AppLanguage) -> Unit,
+    onNavigateToTimetable: () -> Unit,
+    onNavigateToHomework: () -> Unit,
+    onNavigateToGrades: () -> Unit,
+    onNavigateToResources: () -> Unit,
+    onNavigateToChat: () -> Unit,
+    onNavigateToAnnouncements: () -> Unit,
+    onLogout: () -> Unit
+) {
+    val strings = Translations.get(currentLanguage)
+    val currentStudent = firebaseManager.currentUser
+
+    val slots by firebaseManager.observeTimetable(groupId = currentStudent?.groupIds?.firstOrNull()).collectAsState(initial = emptyList())
+    val myGrades by firebaseManager.observeGrades(studentId = currentStudent?.id).collectAsState(initial = emptyList())
+    val attendanceRecords by firebaseManager.observeAttendance().collectAsState(initial = emptyList())
+    val announcements by firebaseManager.observeAnnouncements().collectAsState(initial = emptyList())
+
+    // Student attendance rate
+    val attendanceRate = remember(attendanceRecords, currentStudent) {
+        val studentId = currentStudent?.id ?: ""
+        var presentCount = 0
+        var totalRecorded = 0
+        attendanceRecords.forEach { rec ->
+            if (rec.presentStudentIds.contains(studentId) || rec.absentStudentIds.contains(studentId) || rec.lateStudentIds.contains(studentId)) {
+                totalRecorded++
+                if (rec.presentStudentIds.contains(studentId) || rec.lateStudentIds.contains(studentId)) {
+                    presentCount++
+                }
+            }
+        }
+        if (totalRecorded > 0) ((presentCount.toFloat() / totalRecorded.toFloat()) * 100).toInt() else 100
+    }
+
+    val overallAvg = remember(myGrades) {
+        if (myGrades.isNotEmpty()) String.format("%.1f", myGrades.map { it.score }.average()) else "0.0"
+    }
+
+    val scrollState = rememberScrollState()
+
+    Scaffold(
+        topBar = {
+            AppHeader(
+                title = strings.appName,
+                subtitle = "${strings.roleStudent}: ${currentStudent?.fullName ?: ""}",
+                currentLanguage = currentLanguage,
+                onLanguageChange = onLanguageChange,
+                onLogoutClick = onLogout
+            )
+        }
+    ) { paddingValues ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .verticalScroll(scrollState)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            // Next Class Reminder Banner
+            if (slots.isNotEmpty()) {
+                val nextSlot = slots.first()
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = SchoolPrimary.copy(alpha = 0.12f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Alarm,
+                            contentDescription = null,
+                            tint = SchoolPrimary,
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = strings.nextClassReminder,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = SchoolPrimary
+                            )
+                            Text(
+                                text = "${nextSlot.subjectName} • 📍 ${nextSlot.roomName} (${nextSlot.startTime})",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Stats row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                StatCard(
+                    title = strings.overallAverage,
+                    value = "$overallAvg / 20",
+                    icon = Icons.Default.Grade,
+                    color = SchoolSecondary,
+                    modifier = Modifier.weight(1f)
+                )
+                StatCard(
+                    title = strings.attendanceRate,
+                    value = "$attendanceRate%",
+                    icon = Icons.Default.CheckCircle,
+                    color = Color(0xFF16A34A),
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            // Navigation Actions
+            Text(
+                text = strings.navDashboard,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+            ) {
+                Column(modifier = Modifier.padding(8.dp)) {
+                    DashboardActionRow(
+                        title = strings.timetableTitle,
+                        icon = Icons.Default.CalendarMonth,
+                        color = SchoolPrimary,
+                        onClick = onNavigateToTimetable,
+                        testTag = "student_action_timetable"
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                    DashboardActionRow(
+                        title = strings.homeworkTitle,
+                        icon = Icons.Default.Assignment,
+                        color = SchoolSecondary,
+                        onClick = onNavigateToHomework,
+                        testTag = "student_action_homework"
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                    DashboardActionRow(
+                        title = strings.gradesTitle,
+                        icon = Icons.Default.Grading,
+                        color = SchoolWarning,
+                        onClick = onNavigateToGrades,
+                        testTag = "student_action_grades"
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                    DashboardActionRow(
+                        title = strings.resourcesTitle,
+                        icon = Icons.Default.MenuBook,
+                        color = Color(0xFF0284C7),
+                        onClick = onNavigateToResources,
+                        testTag = "student_action_resources"
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                    DashboardActionRow(
+                        title = strings.chatTitle,
+                        icon = Icons.Default.Chat,
+                        color = Color(0xFF7C3AED),
+                        onClick = onNavigateToChat,
+                        testTag = "student_action_chat"
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                    DashboardActionRow(
+                        title = strings.announcementsTitle,
+                        icon = Icons.Default.Campaign,
+                        color = Color(0xFFD97706),
+                        onClick = onNavigateToAnnouncements,
+                        testTag = "student_action_announcements"
+                    )
+                }
+            }
+        }
+    }
+}

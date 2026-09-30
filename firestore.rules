@@ -1,0 +1,161 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function userRole() {
+      return getUserData().role;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        userRole() == 'ADMIN' ||
+        request.auth.token.email == 'admin@school.app' ||
+        request.auth.uid == 'admin_fixed'
+      );
+    }
+
+    function isTeacher() {
+      return isSignedIn() && userRole() == 'TEACHER';
+    }
+
+    function isStudent() {
+      return isSignedIn() && userRole() == 'STUDENT';
+    }
+
+    function isSelf(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // 1. USERS COLLECTION
+    // Passwords are never stored in Firestore (managed via Firebase Auth).
+    // Primary Admin (isPrimaryAdmin = true) CANNOT be deleted or disabled by other admins.
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      allow create: if isAdmin() || isSelf(userId);
+      allow update: if (
+        isAdmin() && (
+          !resource.data.isPrimaryAdmin ||
+          (isSelf(userId) && request.resource.data.isPrimaryAdmin == true)
+        )
+      ) || (
+        isSelf(userId) &&
+        request.resource.data.role == resource.data.role &&
+        request.resource.data.isPrimaryAdmin == resource.data.isPrimaryAdmin
+      );
+      allow delete: if isAdmin() && (!resource.data.isPrimaryAdmin);
+    }
+
+    // 2. GROUPS, SUBJECTS, ROOMS
+    match /groups/{groupId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /subjects/{subjectId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /rooms/{roomId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // 3. TIMETABLE
+    match /timetable/{slotId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // 4. ATTENDANCE
+    match /attendance/{attendanceId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || isTeacher();
+    }
+
+    // 5. HOMEWORK & SUBMISSIONS
+    match /homework/{homeworkId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || isTeacher();
+    }
+
+    match /submissions/{submissionId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin() || isTeacher() || (
+        resource.data.studentId == request.auth.uid
+      );
+    }
+
+    // 6. GRADES
+    match /grades/{gradeId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || isTeacher();
+    }
+
+    // 7. RESOURCES & MATERIALS
+    match /resources/{resourceId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || isTeacher();
+    }
+
+    // 8. ANNOUNCEMENTS
+    match /announcements/{announcementId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin() || (isTeacher() && getUserData().teacherPermissions.canSendAnnouncements == true);
+    }
+
+    // 9. FINANCE & PAYMENTS
+    match /payments/{paymentId} {
+      allow read: if isAdmin() || (isStudent() && resource.data.studentId == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
+    // 10. CHAT CONVERSATIONS & GROUPS
+    match /conversations/{convId} {
+      allow read: if isSignedIn() && (
+        isAdmin() ||
+        (resource == null || request.auth.uid in resource.data.participantIds)
+      );
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && (
+        isAdmin() ||
+        request.auth.uid in resource.data.participantIds
+      );
+      allow delete: if isAdmin();
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn() && (
+          isAdmin() ||
+          request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participantIds
+        );
+        allow create: if isSignedIn() && (
+          request.resource.data.senderId == request.auth.uid &&
+          (isAdmin() || request.auth.uid in get(/databases/$(database)/documents/conversations/$(convId)).data.participantIds)
+        );
+        allow update, delete: if isAdmin() || resource.data.senderId == request.auth.uid;
+      }
+    }
+
+    // 11. SUBJECT Q&A SPACE
+    match /qa_questions/{questionId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin() || resource.data.authorId == request.auth.uid;
+
+      match /answers/{answerId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn();
+        allow update, delete: if isAdmin() || resource.data.authorId == request.auth.uid;
+      }
+    }
+  }
+}

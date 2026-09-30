@@ -1,0 +1,6 @@
+{
+  "name": "science.est.center",
+  "description": "Private school management platform for students, teachers, and administrators with schedules, attendance, grades, finance, and real-time chat.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

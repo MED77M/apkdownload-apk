@@ -1,0 +1,38 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Chat attachments (Images, Audio Voice Notes)
+    match /chat/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn()
+                   && request.resource.size < 10 * 1024 * 1024 // max 10MB
+                   && (request.resource.contentType.matches('image/.*') ||
+                       request.resource.contentType.matches('audio/.*'));
+    }
+
+    // Educational Resources (PDF, summaries, documents)
+    match /resources/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn()
+                   && request.resource.size < 25 * 1024 * 1024; // max 25MB
+    }
+
+    // Homework submissions
+    match /homework/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn()
+                   && request.resource.size < 20 * 1024 * 1024;
+    }
+
+    // General user avatars or logos
+    match /avatars/{allPaths=**} {
+      allow read: if true;
+      allow write: if isSignedIn() && request.resource.size < 5 * 1024 * 1024;
+    }
+  }
+}

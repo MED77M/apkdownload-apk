@@ -1,0 +1,183 @@
+========================================================================
+science.est.center - FIREBASE SECURITY RULES
+========================================================================
+
+------------------------------------------------------------------------
+1. FIRESTORE SECURITY RULES (Firebase Console > Firestore Database > Rules)
+------------------------------------------------------------------------
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'admin@science.est.center' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'ADMIN')
+      );
+    }
+    
+    function isTeacher() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'TEACHER';
+    }
+    
+    function isStudent() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().role == 'STUDENT';
+    }
+
+    // Users Collection
+    match /users/{userId} {
+      // Any signed in user can read user profiles
+      allow read: if isSignedIn();
+      // Admin can create/update/delete any user; also allow initial setup of admin document
+      allow create: if isSignedIn() && (isAdmin() || request.auth.uid == userId || userId == 'admin_fixed' || request.auth.token.email == 'admin@science.est.center');
+      allow update: if isSignedIn() && (isAdmin() || request.auth.uid == userId);
+      allow delete: if isAdmin();
+    }
+
+    // Academic Structure: Groups, Subjects, Rooms
+    match /groups/{groupId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /subjects/{subjectId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /rooms/{roomId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Timetable
+    match /timetable/{slotId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // Attendance Records
+    match /attendance/{recordId} {
+      allow read: if isSignedIn();
+      allow write: if isTeacher() || isAdmin();
+    }
+
+    // Learning Resources
+    match /resources/{resourceId} {
+      allow read: if isSignedIn();
+      allow write: if (isTeacher() && getUserData().teacherPermissions.canPublishResources == true) || isAdmin();
+    }
+
+    // Homework Assignments
+    match /homework/{hwId} {
+      allow read: if isSignedIn();
+      allow write: if isTeacher() || isAdmin();
+    }
+
+    // Homework Submissions
+    match /homework_submissions/{subId} {
+      allow read: if isSignedIn() && (request.auth.uid == resource.data.studentId || isTeacher() || isAdmin());
+      allow create: if isSignedIn();
+      allow update: if isTeacher() || isAdmin() || (request.auth.uid == resource.data.studentId);
+      allow delete: if isAdmin();
+    }
+
+    // Grades
+    match /grades/{gradeId} {
+      allow read: if isSignedIn() && (request.auth.uid == resource.data.studentId || isTeacher() || isAdmin());
+      allow write: if (isTeacher() && getUserData().teacherPermissions.canEditGrades == true) || isAdmin();
+    }
+
+    // Finance & Payments (Admin only)
+    match /payments/{paymentId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Announcements
+    match /announcements/{announcementId} {
+      allow read: if isSignedIn();
+      allow write: if (isTeacher() && getUserData().teacherPermissions.canSendAnnouncements == true) || isAdmin();
+    }
+
+    // Chat System: Conversations & Messages
+    match /conversations/{conversationId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.creatorId == request.auth.uid);
+
+      match /messages/{messageId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn();
+        allow delete: if isAdmin() || (isSignedIn() && request.auth.uid == resource.data.senderId);
+      }
+    }
+
+    // Subject Q&A Space (Text only)
+    match /qa_posts/{postId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin() || (isSignedIn() && request.auth.uid == resource.data.authorId);
+
+      match /replies/{replyId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn();
+        allow delete: if isAdmin() || (isSignedIn() && request.auth.uid == resource.data.authorId);
+      }
+    }
+  }
+}
+
+
+------------------------------------------------------------------------
+2. FIREBASE STORAGE SECURITY RULES (Firebase Console > Storage > Rules)
+------------------------------------------------------------------------
+
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Chat images (max 10MB)
+    match /chat_images/{conversationId}/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() 
+        && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    // Chat voice recordings (max 15MB, ~5 minutes)
+    match /chat_audio/{conversationId}/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() 
+        && request.resource.size < 15 * 1024 * 1024;
+    }
+
+    // Learning Resources (max 50MB)
+    match /resources/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() 
+        && request.resource.size < 50 * 1024 * 1024;
+    }
+
+    // Homework attachments
+    match /homework/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn()
+        && request.resource.size < 25 * 1024 * 1024;
+    }
+  }
+}
