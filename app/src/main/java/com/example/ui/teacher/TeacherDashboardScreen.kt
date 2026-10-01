@@ -36,6 +36,7 @@ fun TeacherDashboardScreen(
     onNavigateToHomework: () -> Unit,
     onNavigateToGrades: () -> Unit,
     onNavigateToChat: () -> Unit,
+    onNavigateToFinance: () -> Unit = {},
     onLogout: () -> Unit
 ) {
     val strings = Translations.get(currentLanguage)
@@ -48,6 +49,7 @@ fun TeacherDashboardScreen(
     val canPublish = currentTeacher?.teacherPermissions?.canPublishResources ?: true
     val canEditGrades = currentTeacher?.teacherPermissions?.canEditGrades ?: true
     val canAnnounce = currentTeacher?.teacherPermissions?.canSendAnnouncements ?: true
+    val canViewFinance = currentTeacher?.teacherPermissions?.canViewFinance ?: false
 
     val scrollState = rememberScrollState()
 
@@ -145,6 +147,17 @@ fun TeacherDashboardScreen(
                         onClick = onNavigateToChat,
                         testTag = "teacher_action_chat"
                     )
+
+                    if (canViewFinance) {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                        DashboardActionRow(
+                            title = strings.teacherFinanceTitle,
+                            icon = Icons.Default.AccountBalanceWallet,
+                            color = Color(0xFF16A34A),
+                            onClick = onNavigateToFinance,
+                            testTag = "teacher_action_finance"
+                        )
+                    }
                 }
             }
 

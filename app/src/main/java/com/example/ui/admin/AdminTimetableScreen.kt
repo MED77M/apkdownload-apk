@@ -54,6 +54,7 @@ fun AdminTimetableScreen(
     }
 
     var showAddSlotDialog by remember { mutableStateOf(false) }
+    var editingSlot by remember { mutableStateOf<TimetableSlot?>(null) }
     var showAddGroupDialog by remember { mutableStateOf(false) }
     var showAddSubjectDialog by remember { mutableStateOf(false) }
     var showAddRoomDialog by remember { mutableStateOf(false) }
@@ -166,6 +167,7 @@ fun AdminTimetableScreen(
                     items(daySlots, key = { it.id }) { slot ->
                         TimetableSlotCard(
                             slot = slot,
+                            onEdit = { editingSlot = slot },
                             onDelete = {
                                 scope.launch {
                                     firebaseManager.deleteTimetableSlot(slot.id)
@@ -328,11 +330,120 @@ fun AdminTimetableScreen(
             }
         )
     }
+
+    editingSlot?.let { slot ->
+        EditSlotDialog(
+            slot = slot,
+            strings = strings,
+            onDismiss = { editingSlot = null },
+            onSave = { updatedSlot ->
+                scope.launch {
+                    val res = firebaseManager.updateTimetableSlot(updatedSlot)
+                    if (res.isSuccess) {
+                        Toast.makeText(context, strings.save, Toast.LENGTH_SHORT).show()
+                        editingSlot = null
+                    } else {
+                        Toast.makeText(context, strings.error, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun EditSlotDialog(
+    slot: TimetableSlot,
+    strings: com.example.localization.AppStrings,
+    onDismiss: () -> Unit,
+    onSave: (TimetableSlot) -> Unit
+) {
+    var subjectName by remember { mutableStateOf(slot.subjectName) }
+    var teacherName by remember { mutableStateOf(slot.teacherName) }
+    var groupName by remember { mutableStateOf(slot.groupName) }
+    var roomName by remember { mutableStateOf(slot.roomName) }
+    var startTime by remember { mutableStateOf(slot.startTime) }
+    var endTime by remember { mutableStateOf(slot.endTime) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(strings.editTimetableSlot) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = subjectName,
+                    onValueChange = { subjectName = it },
+                    label = { Text(strings.subjectsTitle) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = teacherName,
+                    onValueChange = { teacherName = it },
+                    label = { Text(strings.roleTeacher) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = groupName,
+                    onValueChange = { groupName = it },
+                    label = { Text(strings.groupName) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = roomName,
+                    onValueChange = { roomName = it },
+                    label = { Text(strings.roomsTitle) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = startTime,
+                        onValueChange = { startTime = it },
+                        label = { Text("Start (HH:MM)") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                    OutlinedTextField(
+                        value = endTime,
+                        onValueChange = { endTime = it },
+                        label = { Text("End (HH:MM)") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onSave(
+                        slot.copy(
+                            subjectName = subjectName.trim(),
+                            teacherName = teacherName.trim(),
+                            groupName = groupName.trim(),
+                            roomName = roomName.trim(),
+                            startTime = startTime.trim(),
+                            endTime = endTime.trim()
+                        )
+                    )
+                }
+            ) {
+                Text(strings.save)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(strings.cancel) }
+        }
+    )
 }
 
 @Composable
 fun TimetableSlotCard(
     slot: TimetableSlot,
+    onEdit: () -> Unit = {},
     onDelete: () -> Unit
 ) {
     Card(
@@ -383,8 +494,13 @@ fun TimetableSlotCard(
                 )
             }
 
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Default.Delete, contentDescription = "Delete Slot", tint = MaterialTheme.colorScheme.error)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onEdit) {
+                    Icon(Icons.Default.Edit, contentDescription = "Edit Slot", tint = SchoolPrimary)
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Default.Delete, contentDescription = "Delete Slot", tint = MaterialTheme.colorScheme.error)
+                }
             }
         }
     }

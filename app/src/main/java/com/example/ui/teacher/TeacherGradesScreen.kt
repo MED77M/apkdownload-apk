@@ -50,6 +50,7 @@ fun TeacherGradesScreen(
     val subjects by firebaseManager.observeSubjects().collectAsState(initial = emptyList())
 
     var showAddGradeDialog by remember { mutableStateOf(false) }
+    var editingGrade by remember { mutableStateOf<GradeItem?>(null) }
 
     Scaffold(
         topBar = {
@@ -151,10 +152,34 @@ fun TeacherGradesScreen(
                                         )
                                     }
                                 }
-                                StatusBadge(
-                                    text = "${grade.score} / ${grade.maxScore.toInt()}",
-                                    color = if (grade.score >= 10f) Color(0xFF16A34A) else Color(0xFFDC2626)
-                                )
+                                Column(horizontalAlignment = Alignment.End) {
+                                    StatusBadge(
+                                        text = "${grade.score} / ${grade.maxScore.toInt()}",
+                                        color = if (grade.score >= 10f) Color(0xFF16A34A) else Color(0xFFDC2626)
+                                    )
+                                    if (grade.updatedAt != null) {
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = "✏️ ${strings.editedBadge}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                    if (canEditGrades) {
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        IconButton(
+                                            onClick = { editingGrade = grade },
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Edit,
+                                                contentDescription = strings.editGrade,
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -181,6 +206,116 @@ fun TeacherGradesScreen(
             }
         )
     }
+
+    editingGrade?.let { grade ->
+        EditGradeDialog(
+            grade = grade,
+            strings = strings,
+            onDismiss = { editingGrade = null },
+            onSave = { updatedGrade ->
+                scope.launch {
+                    val res = firebaseManager.updateGradeItem(updatedGrade)
+                    if (res.isSuccess) {
+                        Toast.makeText(context, strings.save, Toast.LENGTH_SHORT).show()
+                        editingGrade = null
+                    } else {
+                        Toast.makeText(context, strings.error, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun EditGradeDialog(
+    grade: GradeItem,
+    strings: com.example.localization.AppStrings,
+    onDismiss: () -> Unit,
+    onSave: (GradeItem) -> Unit
+) {
+    var scoreStr by remember { mutableStateOf(grade.score.toString()) }
+    var maxScoreStr by remember { mutableStateOf(grade.maxScore.toInt().toString()) }
+    var comment by remember { mutableStateOf(grade.comment) }
+    var selectedType by remember { mutableStateOf(grade.type) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(strings.editGrade) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "${grade.studentName} • ${grade.subjectName}",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilterChip(
+                        selected = selectedType == "EXAM",
+                        onClick = { selectedType = "EXAM" },
+                        label = { Text(strings.typeExam) }
+                    )
+                    FilterChip(
+                        selected = selectedType == "QUIZ",
+                        onClick = { selectedType = "QUIZ" },
+                        label = { Text(strings.typeQuiz) }
+                    )
+                    FilterChip(
+                        selected = selectedType == "HOMEWORK",
+                        onClick = { selectedType = "HOMEWORK" },
+                        label = { Text(strings.typeHomeworkGrade) }
+                    )
+                }
+
+                OutlinedTextField(
+                    value = scoreStr,
+                    onValueChange = { scoreStr = it },
+                    label = { Text(strings.gradeValue) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = maxScoreStr,
+                    onValueChange = { maxScoreStr = it },
+                    label = { Text("Max Score (e.g. 20)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = comment,
+                    onValueChange = { comment = it },
+                    label = { Text("Feedback / Comment") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val score = scoreStr.toFloatOrNull() ?: grade.score
+                    val maxScore = maxScoreStr.toFloatOrNull() ?: grade.maxScore
+                    onSave(
+                        grade.copy(
+                            score = score,
+                            maxScore = maxScore,
+                            type = selectedType,
+                            comment = comment.trim()
+                        )
+                    )
+                },
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Text(strings.save)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(strings.cancel) }
+        }
+    )
 }
 
 @Composable

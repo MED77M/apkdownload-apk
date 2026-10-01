@@ -49,6 +49,7 @@ fun TeacherHomeworkScreen(
 
     var showCreateDialog by remember { mutableStateOf(false) }
     var selectedHomeworkForSubmissions by remember { mutableStateOf<Homework?>(null) }
+    var editingHomework by remember { mutableStateOf<Homework?>(null) }
 
     Scaffold(
         topBar = {
@@ -117,11 +118,25 @@ fun TeacherHomeworkScreen(
                                             color = SchoolPrimary
                                         )
                                     }
-                                    Button(
-                                        onClick = { selectedHomeworkForSubmissions = hw },
-                                        shape = RoundedCornerShape(10.dp)
-                                    ) {
-                                        Text(strings.submissions)
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        IconButton(
+                                            onClick = { editingHomework = hw },
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Edit,
+                                                contentDescription = strings.editHomework,
+                                                tint = SchoolPrimary,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        Button(
+                                            onClick = { selectedHomeworkForSubmissions = hw },
+                                            shape = RoundedCornerShape(10.dp)
+                                        ) {
+                                            Text(strings.submissions)
+                                        }
                                     }
                                 }
                                 if (hw.description.isNotEmpty()) {
@@ -171,6 +186,98 @@ fun TeacherHomeworkScreen(
             onDismiss = { selectedHomeworkForSubmissions = null }
         )
     }
+
+    editingHomework?.let { hw ->
+        EditHomeworkDialog(
+            homework = hw,
+            strings = strings,
+            onDismiss = { editingHomework = null },
+            onSave = { updatedHw ->
+                scope.launch {
+                    val res = firebaseManager.updateHomework(updatedHw)
+                    if (res.isSuccess) {
+                        Toast.makeText(context, strings.save, Toast.LENGTH_SHORT).show()
+                        editingHomework = null
+                    } else {
+                        Toast.makeText(context, strings.error, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun EditHomeworkDialog(
+    homework: Homework,
+    strings: com.example.localization.AppStrings,
+    onDismiss: () -> Unit,
+    onSave: (Homework) -> Unit
+) {
+    var title by remember { mutableStateOf(homework.title) }
+    var description by remember { mutableStateOf(homework.description) }
+    var deadline by remember { mutableStateOf(homework.deadline) }
+    var attachmentUrl by remember { mutableStateOf(homework.attachmentUrl) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(strings.editHomework) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text(strings.homeworkTitle) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text("Description") },
+                    maxLines = 4,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = deadline,
+                    onValueChange = { deadline = it },
+                    label = { Text("${strings.deadline} (YYYY-MM-DD)") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                OutlinedTextField(
+                    value = attachmentUrl,
+                    onValueChange = { attachmentUrl = it },
+                    label = { Text("Attachment Link / File URL") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (title.isNotBlank()) {
+                        onSave(
+                            homework.copy(
+                                title = title.trim(),
+                                description = description.trim(),
+                                deadline = deadline.trim(),
+                                attachmentUrl = attachmentUrl.trim()
+                            )
+                        )
+                    }
+                },
+                enabled = title.isNotBlank(),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Text(strings.save)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(strings.cancel) }
+        }
+    )
 }
 
 @Composable

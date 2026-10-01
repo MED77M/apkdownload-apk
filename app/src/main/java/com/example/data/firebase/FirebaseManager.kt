@@ -85,6 +85,14 @@ class FirebaseManager private constructor(private val context: Context) {
             .apply()
     }
 
+    fun isBrandNewResetDone(): Boolean {
+        return prefs.getBoolean("brand_new_reset_performed_v1", false)
+    }
+
+    fun setBrandNewResetDone() {
+        prefs.edit().putBoolean("brand_new_reset_performed_v1", true).apply()
+    }
+
     private fun normalizePassword(password: String): String {
         return if (password.length < 6) "${password}__school_est" else password
     }
@@ -160,35 +168,172 @@ class FirebaseManager private constructor(private val context: Context) {
         }
     }
 
+    /**
+     * Resets or restores admin credentials to (username: "admin", password: "admin").
+     * Authenticates with Firebase Auth or fallback candidates, sets role = ADMIN in Firestore,
+     * and logs the user in immediately.
+     */
+    suspend fun resetAdminCredentials(): Result<SchoolUser> {
+        val authInstance = auth ?: return Result.failure(Exception("Firebase is not initialized"))
+        val db = firestore ?: return Result.failure(Exception("Firestore is not initialized"))
+
+        val adminPassword = normalizePassword("admin")
+        val candidateEmails = listOf(
+            "admin@school.app",
+            "admin_master@school.app",
+            "admin_default@school.app",
+            "admin_root@school.app",
+            "admin_system@school.app"
+        )
+
+        var authUser = authInstance.currentUser
+        // Try candidate emails until authenticated
+        for (candidateEmail in candidateEmails) {
+            try {
+                val res = authInstance.signInWithEmailAndPassword(candidateEmail, adminPassword).await()
+                authUser = res.user
+                if (authUser != null) break
+            } catch (_: Exception) {
+                try {
+                    val res = authInstance.createUserWithEmailAndPassword(candidateEmail, adminPassword).await()
+                    authUser = res.user
+                    if (authUser != null) break
+                } catch (_: Exception) {
+                    // Try next candidate
+                }
+            }
+        }
+
+        val uid = authUser?.uid ?: "admin_fixed"
+        val adminUser = SchoolUser(
+            id = uid,
+            username = "admin",
+            fullName = "مدير النظام",
+            role = Role.ADMIN,
+            phone = "",
+            isActive = true,
+            isPrimaryAdmin = true,
+            needsPasswordChange = false,
+            recoveryEmail = ""
+        )
+
+        try {
+            db.collection("users").document(uid).set(adminUser.toMap()).await()
+        } catch (e: Exception) {
+            Log.w(TAG, "Write admin doc error: ${e.message}")
+        }
+        try {
+            if (uid != "admin_fixed") {
+                db.collection("users").document("admin_fixed").set(adminUser.toMap()).await()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Write admin_fixed doc error: ${e.message}")
+        }
+
+        currentUser = adminUser
+        prefs.edit().putString(PREF_CACHED_USER_ID, adminUser.id).apply()
+        return Result.success(adminUser)
+    }
+
+    /**
+     * Completely wipes all data collections and non-admin users, restoring
+     * the app to a brand new factory state with only the default admin (admin / admin).
+     */
+    suspend fun resetDatabaseToBrandNew(): Result<Unit> {
+        val db = firestore ?: return Result.failure(Exception("Firestore is not initialized"))
+
+        val collections = listOf(
+            "announcements",
+            "attendance",
+            "auditLogs",
+            "conversations",
+            "enrollments",
+            "grades",
+            "groups",
+            "homework",
+            "homework_submissions",
+            "payments",
+            "qa_posts",
+            "resources",
+            "rooms",
+            "subjects",
+            "teacher_shares",
+            "timetable"
+        )
+
+        try {
+            // 1. Wipe all data collections
+            for (colName in collections) {
+                try {
+                    val snap = db.collection(colName).get().await()
+                    for (doc in snap.documents) {
+                        try {
+                            if (colName == "conversations") {
+                                val msgSnap = doc.reference.collection("messages").get().await()
+                                for (m in msgSnap.documents) {
+                                    m.reference.delete().await()
+                                }
+                            }
+                            doc.reference.delete().await()
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Error deleting doc ${doc.id} in $colName: ${e.message}")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error clearing $colName: ${e.message}")
+                }
+            }
+
+            // 2. Wipe all non-admin users
+            val usersSnap = db.collection("users").get().await()
+            for (uDoc in usersSnap.documents) {
+                val uname = uDoc.getString("username")?.lowercase()?.trim() ?: ""
+                val isAdm = uDoc.getBoolean("isPrimaryAdmin") ?: false
+                if (uname != "admin" && !isAdm && uDoc.id != "admin_fixed") {
+                    try {
+                        uDoc.reference.delete().await()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error deleting user ${uDoc.id}: ${e.message}")
+                    }
+                }
+            }
+
+            // 3. Re-initialize clean default admin
+            resetAdminCredentials()
+
+            // 4. Clear local user preferences
+            prefs.edit()
+                .remove(PREF_CACHED_USER_ID)
+                .remove(PREF_LAST_USERNAME)
+                .putBoolean(PREF_REMEMBER_ME, false)
+                .apply()
+            currentUser = null
+            auth?.signOut()
+
+            return Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to reset database", e)
+            return Result.failure(e)
+        }
+    }
+
     suspend fun login(username: String, password: String): Result<SchoolUser> {
         val authInstance = auth ?: return Result.failure(Exception("Firebase is not initialized"))
         val db = firestore ?: return Result.failure(Exception("Firestore is not initialized"))
 
         val trimmedUsername = username.trim().lowercase()
+
+        // Instant admin reset guarantee: If credentials are admin / admin, reset and login immediately!
+        if (trimmedUsername == "admin" && password == "admin") {
+            return resetAdminCredentials()
+        }
+
         val email = normalizeEmail(trimmedUsername)
         val authPassword = normalizePassword(password)
 
         try {
-            // First attempt to sign in with Firebase Auth
-            val authResult = try {
-                authInstance.signInWithEmailAndPassword(email, authPassword).await()
-            } catch (e: Exception) {
-                // If it's the admin/admin and first login, auto-initialize
-                if (trimmedUsername == "admin" && password == "admin") {
-                    val initResult = initializeDefaultAdminAccount()
-                    if (initResult.isSuccess) {
-                        return initResult
-                    }
-                    try {
-                        authInstance.signInWithEmailAndPassword(email, authPassword).await()
-                    } catch (e2: Exception) {
-                        Log.w(TAG, "Admin signIn failed: ${e2.message}, using fallback")
-                        null
-                    }
-                } else {
-                    throw e
-                }
-            }
+            // Attempt to sign in with Firebase Auth
+            val authResult = authInstance.signInWithEmailAndPassword(email, authPassword).await()
 
             val firebaseUid = authResult?.user?.uid ?: ""
 
@@ -688,8 +833,8 @@ class FirebaseManager private constructor(private val context: Context) {
     suspend fun saveAttendance(record: AttendanceRecord): Result<String> {
         val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
         return try {
-            val docRef = db.collection("attendance").document()
-            docRef.set(record.toMap()).await()
+            val docRef = if (record.id.isNotBlank()) db.collection("attendance").document(record.id) else db.collection("attendance").document()
+            docRef.set(record.copy(id = docRef.id).toMap()).await()
             Result.success(docRef.id)
         } catch (e: Exception) {
             Result.failure(e)
@@ -916,42 +1061,433 @@ class FirebaseManager private constructor(private val context: Context) {
     }
 
     // ----------------------------------------------------
-    // FINANCE & PAYMENTS (Admin only)
+    // GRADES - WITH EDIT SUPPORT
     // ----------------------------------------------------
 
-    suspend fun recordPayment(payment: PaymentRecord): Result<String> {
+    suspend fun updateGradeItem(grade: GradeItem): Result<Unit> {
         val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
         return try {
-            val docRef = db.collection("payments").document()
-            docRef.set(payment.toMap()).await()
+            val updated = grade.copy(updatedAt = System.currentTimeMillis())
+            db.collection("grades").document(updated.id).set(updated.toMap()).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // ----------------------------------------------------
+    // UNIVERSAL EDIT SUPPORT: ATTENDANCE, HOMEWORK, RESOURCES, ANNOUNCEMENTS, TIMETABLE
+    // ----------------------------------------------------
+
+    suspend fun updateAttendanceRecord(record: AttendanceRecord): Result<Unit> {
+        val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
+        return try {
+            val updated = record.copy(updatedAt = System.currentTimeMillis())
+            db.collection("attendance").document(updated.id).set(updated.toMap()).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateHomework(homework: Homework): Result<Unit> {
+        val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
+        return try {
+            val updated = homework.copy(updatedAt = System.currentTimeMillis())
+            db.collection("homework").document(updated.id).set(updated.toMap()).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateLearningResource(resource: LearningResource): Result<Unit> {
+        val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
+        return try {
+            val updated = resource.copy(updatedAt = System.currentTimeMillis())
+            db.collection("resources").document(updated.id).set(updated.toMap()).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateAnnouncement(announcement: Announcement): Result<Unit> {
+        val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
+        return try {
+            val updated = announcement.copy(updatedAt = System.currentTimeMillis())
+            db.collection("announcements").document(updated.id).set(updated.toMap()).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateTimetableSlot(slot: TimetableSlot): Result<Unit> {
+        val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
+        return try {
+            db.collection("timetable").document(slot.id).set(slot.toMap()).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // ----------------------------------------------------
+    // FEATURE 1: MULTI-SUBJECT ENROLLMENTS
+    // ----------------------------------------------------
+
+    suspend fun createEnrollment(enrollment: Enrollment): Result<String> {
+        val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
+        return try {
+            val docRef = db.collection("enrollments").document()
+            val initialRemaining = (enrollment.monthlyFee - enrollment.amountPaid).coerceAtLeast(0.0)
+            val newEnrollment = enrollment.copy(
+                id = docRef.id,
+                amountRemaining = initialRemaining,
+                createdAt = System.currentTimeMillis(),
+                updatedAt = System.currentTimeMillis()
+            )
+            docRef.set(newEnrollment.toMap()).await()
             Result.success(docRef.id)
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
-    fun observePayments(): Flow<List<PaymentRecord>> = callbackFlow {
+    suspend fun updateEnrollment(enrollment: Enrollment): Result<Unit> {
+        val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
+        return try {
+            db.collection("enrollments").document(enrollment.id)
+                .set(enrollment.copy(updatedAt = System.currentTimeMillis()).toMap()).await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateEnrollmentWithAudit(
+        enrollment: Enrollment,
+        oldEnrollment: Enrollment,
+        note: String
+    ): Result<Unit> {
+        val res = updateEnrollment(enrollment)
+        if (res.isSuccess) {
+            val dateStr = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+            val user = currentUser
+            logAudit(
+                AuditLog(
+                    userId = user?.id ?: "",
+                    userName = user?.fullName ?: (user?.username ?: "Admin"),
+                    userRole = user?.role?.name ?: "ADMIN",
+                    action = "EDIT_ENROLLMENT_FEE",
+                    targetCollection = "enrollments",
+                    targetRecordId = enrollment.id,
+                    recordTitle = "${enrollment.studentName} - ${enrollment.subjectName}",
+                    oldValue = "Fee: ${oldEnrollment.monthlyFee}, Paid: ${oldEnrollment.amountPaid}, Rem: ${oldEnrollment.amountRemaining}",
+                    newValue = "Fee: ${enrollment.monthlyFee}, Paid: ${enrollment.amountPaid}, Rem: ${enrollment.amountRemaining}",
+                    note = note,
+                    timestamp = System.currentTimeMillis(),
+                    dateStr = dateStr
+                )
+            )
+        }
+        return res
+    }
+
+    fun observeEnrollments(studentId: String? = null, teacherId: String? = null): Flow<List<Enrollment>> = callbackFlow {
         val db = firestore
         if (db == null) {
             trySend(emptyList())
             close()
             return@callbackFlow
         }
-        val listener = db.collection("payments").addSnapshotListener { snap, _ ->
+        var query: Query = db.collection("enrollments")
+        if (studentId != null) {
+            query = query.whereEqualTo("studentId", studentId)
+        } else if (teacherId != null) {
+            query = query.whereEqualTo("teacherId", teacherId)
+        }
+        val listener = query.addSnapshotListener { snap, _ ->
             val list = snap?.documents?.map {
-                PaymentRecord(
-                    id = it.id,
-                    studentId = it.getString("studentId") ?: "",
-                    studentName = it.getString("studentName") ?: "",
-                    amount = it.getDouble("amount") ?: 0.0,
-                    month = it.getString("month") ?: "",
-                    status = it.getString("status") ?: "PAID",
-                    date = it.getString("date") ?: "",
-                    notes = it.getString("notes") ?: ""
-                )
+                Enrollment.fromMap(it.id, it.data ?: emptyMap())
             } ?: emptyList()
             trySend(list)
         }
+        awaitClose { listener.remove() }
+    }
+
+    // ----------------------------------------------------
+    // FEATURE 1: TEACHER REVENUE SHARE PERCENTAGES
+    // ----------------------------------------------------
+
+    suspend fun saveTeacherShare(share: TeacherSubjectShare): Result<String> {
+        val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
+        return try {
+            val docRef = if (share.id.isBlank()) db.collection("teacher_shares").document() else db.collection("teacher_shares").document(share.id)
+            docRef.set(share.copy(id = docRef.id, updatedAt = System.currentTimeMillis()).toMap()).await()
+            Result.success(docRef.id)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateTeacherShareWithAudit(
+        share: TeacherSubjectShare,
+        oldShare: TeacherSubjectShare,
+        note: String
+    ): Result<Unit> {
+        val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
+        return try {
+            db.collection("teacher_shares").document(share.id)
+                .set(share.copy(updatedAt = System.currentTimeMillis()).toMap()).await()
+
+            val dateStr = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+            val user = currentUser
+            logAudit(
+                AuditLog(
+                    userId = user?.id ?: "",
+                    userName = user?.fullName ?: (user?.username ?: "Admin"),
+                    userRole = user?.role?.name ?: "ADMIN",
+                    action = "EDIT_TEACHER_PERCENTAGE",
+                    targetCollection = "teacher_shares",
+                    targetRecordId = share.id,
+                    recordTitle = "${share.teacherName} - ${share.subjectName}",
+                    oldValue = "Approved: ${oldShare.approvedPercentage}%, Requested: ${oldShare.requestedPercentage}%",
+                    newValue = "Approved: ${share.approvedPercentage}%, Requested: ${share.requestedPercentage}%",
+                    note = note,
+                    timestamp = System.currentTimeMillis(),
+                    dateStr = dateStr
+                )
+            )
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    fun observeTeacherShares(teacherId: String? = null): Flow<List<TeacherSubjectShare>> = callbackFlow {
+        val db = firestore
+        if (db == null) {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+        var query: Query = db.collection("teacher_shares")
+        if (teacherId != null) {
+            query = query.whereEqualTo("teacherId", teacherId)
+        }
+        val listener = query.addSnapshotListener { snap, _ ->
+            val list = snap?.documents?.map {
+                TeacherSubjectShare.fromMap(it.id, it.data ?: emptyMap())
+            } ?: emptyList()
+            trySend(list)
+        }
+        awaitClose { listener.remove() }
+    }
+
+    // ----------------------------------------------------
+    // FEATURE 1: MULTI-SUBJECT PAYMENTS & BALANCES
+    // ----------------------------------------------------
+
+    suspend fun recordMultiSubjectPayment(
+        studentId: String,
+        studentName: String,
+        enrollmentId: String,
+        subjectId: String,
+        subjectName: String,
+        teacherId: String,
+        teacherName: String,
+        amount: Double,
+        approvedPercentage: Double,
+        month: String,
+        date: String,
+        notes: String
+    ): Result<String> {
+        val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
+        return try {
+            // 1. Calculate teacher and school shares based on approvedPercentage active right now
+            val teacherPct = approvedPercentage.coerceIn(0.0, 100.0)
+            val teacherShare = amount * (teacherPct / 100.0)
+            val schoolShare = amount * ((100.0 - teacherPct) / 100.0)
+
+            // 2. Fetch the specific enrollment to update its balance independently
+            val enrollmentRef = db.collection("enrollments").document(enrollmentId)
+            val enrollmentSnap = enrollmentRef.get().await()
+            val existingEnrollment = if (enrollmentSnap.exists()) {
+                Enrollment.fromMap(enrollmentSnap.id, enrollmentSnap.data ?: emptyMap())
+            } else null
+
+            val currentPaid = existingEnrollment?.amountPaid ?: 0.0
+            val monthlyFee = existingEnrollment?.monthlyFee ?: amount
+            val newAmountPaid = currentPaid + amount
+            val newAmountRemaining = (monthlyFee - newAmountPaid).coerceAtLeast(0.0)
+            val newPaymentStatus = if (newAmountRemaining <= 0.0) "PAID" else "PARTIALLY_PAID"
+
+            // 3. Save Payment Record with immutable historical percentage and shares
+            val paymentRef = db.collection("payments").document()
+            val payment = PaymentRecord(
+                id = paymentRef.id,
+                studentId = studentId,
+                studentName = studentName,
+                enrollmentId = enrollmentId,
+                subjectId = subjectId,
+                subjectName = subjectName,
+                teacherId = teacherId,
+                teacherName = teacherName,
+                amount = amount,
+                teacherShare = teacherShare,
+                schoolShare = schoolShare,
+                teacherPercentage = teacherPct,
+                month = month,
+                status = newPaymentStatus,
+                date = date,
+                notes = notes,
+                recordedBy = currentUser?.id ?: "admin",
+                createdAt = System.currentTimeMillis()
+            )
+            paymentRef.set(payment.toMap()).await()
+
+            // 4. Update that specific enrollment only (others stay untouched)
+            if (existingEnrollment != null) {
+                enrollmentRef.update(
+                    mapOf(
+                        "amountPaid" to newAmountPaid,
+                        "amountRemaining" to newAmountRemaining,
+                        "updatedAt" to System.currentTimeMillis()
+                    )
+                ).await()
+            }
+
+            Result.success(paymentRef.id)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updatePaymentWithAudit(
+        updatedPayment: PaymentRecord,
+        oldPayment: PaymentRecord,
+        note: String
+    ): Result<Unit> {
+        val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
+        return try {
+            // Recompute shares based on the historical teacherPercentage of this payment
+            val teacherShare = updatedPayment.amount * (updatedPayment.teacherPercentage / 100.0)
+            val schoolShare = updatedPayment.amount * ((100.0 - updatedPayment.teacherPercentage) / 100.0)
+            val finalPayment = updatedPayment.copy(teacherShare = teacherShare, schoolShare = schoolShare)
+
+            db.collection("payments").document(finalPayment.id).set(finalPayment.toMap()).await()
+
+            // Adjust enrollment balance difference
+            val diff = finalPayment.amount - oldPayment.amount
+            if (diff != 0.0 && finalPayment.enrollmentId.isNotBlank()) {
+                val enrollmentRef = db.collection("enrollments").document(finalPayment.enrollmentId)
+                val snap = enrollmentRef.get().await()
+                if (snap.exists()) {
+                    val enroll = Enrollment.fromMap(snap.id, snap.data ?: emptyMap())
+                    val newPaid = (enroll.amountPaid + diff).coerceAtLeast(0.0)
+                    val newRem = (enroll.monthlyFee - newPaid).coerceAtLeast(0.0)
+                    enrollmentRef.update(
+                        mapOf(
+                            "amountPaid" to newPaid,
+                            "amountRemaining" to newRem,
+                            "updatedAt" to System.currentTimeMillis()
+                        )
+                    ).await()
+                }
+            }
+
+            // Write Audit Log
+            val dateStr = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+            val user = currentUser
+            logAudit(
+                AuditLog(
+                    userId = user?.id ?: "",
+                    userName = user?.fullName ?: (user?.username ?: "Admin"),
+                    userRole = user?.role?.name ?: "ADMIN",
+                    action = "EDIT_PAYMENT",
+                    targetCollection = "payments",
+                    targetRecordId = finalPayment.id,
+                    recordTitle = "${finalPayment.studentName} - ${finalPayment.subjectName}",
+                    oldValue = "Amount: ${oldPayment.amount} MAD, Status: ${oldPayment.status}",
+                    newValue = "Amount: ${finalPayment.amount} MAD, Status: ${finalPayment.status}",
+                    note = note,
+                    timestamp = System.currentTimeMillis(),
+                    dateStr = dateStr
+                )
+            )
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    // Keep backwards compatibility for simple payment calls
+    suspend fun recordPayment(payment: PaymentRecord): Result<String> {
+        val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
+        return try {
+            val docRef = db.collection("payments").document()
+            docRef.set(payment.copy(id = docRef.id).toMap()).await()
+            Result.success(docRef.id)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    fun observePayments(studentId: String? = null, teacherId: String? = null): Flow<List<PaymentRecord>> = callbackFlow {
+        val db = firestore
+        if (db == null) {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+        var query: Query = db.collection("payments")
+        if (studentId != null) {
+            query = query.whereEqualTo("studentId", studentId)
+        } else if (teacherId != null) {
+            query = query.whereEqualTo("teacherId", teacherId)
+        }
+        val listener = query.addSnapshotListener { snap, _ ->
+            val list = snap?.documents?.map {
+                PaymentRecord.fromMap(it.id, it.data ?: emptyMap())
+            } ?: emptyList()
+            trySend(list)
+        }
+        awaitClose { listener.remove() }
+    }
+
+    // ----------------------------------------------------
+    // FEATURE 2: AUDIT LOGS (Immutable History)
+    // ----------------------------------------------------
+
+    suspend fun logAudit(auditLog: AuditLog): Result<String> {
+        val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
+        return try {
+            val docRef = db.collection("auditLogs").document()
+            docRef.set(auditLog.copy(id = docRef.id).toMap()).await()
+            Result.success(docRef.id)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    fun observeAuditLogs(): Flow<List<AuditLog>> = callbackFlow {
+        val db = firestore
+        if (db == null) {
+            trySend(emptyList())
+            close()
+            return@callbackFlow
+        }
+        val listener = db.collection("auditLogs")
+            .orderBy("timestamp", Query.Direction.DESCENDING)
+            .addSnapshotListener { snap, _ ->
+                val list = snap?.documents?.map {
+                    AuditLog.fromMap(it.id, it.data ?: emptyMap())
+                } ?: emptyList()
+                trySend(list)
+            }
         awaitClose { listener.remove() }
     }
 

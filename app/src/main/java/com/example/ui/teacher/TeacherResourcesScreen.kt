@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.data.firebase.FirebaseManager
 import com.example.data.model.LearningResource
+import com.example.data.model.Role
 import com.example.localization.AppLanguage
 import com.example.localization.Translations
 import com.example.ui.admin.DropdownSelector
@@ -48,6 +49,7 @@ fun TeacherResourcesScreen(
     val subjects by firebaseManager.observeSubjects().collectAsState(initial = emptyList())
 
     var showAddDialog by remember { mutableStateOf(false) }
+    var editingResource by remember { mutableStateOf<LearningResource?>(null) }
 
     Scaffold(
         topBar = {
@@ -142,18 +144,33 @@ fun TeacherResourcesScreen(
                                         )
                                     }
                                 }
-                                if (res.fileUrl.isNotEmpty()) {
-                                    IconButton(
-                                        onClick = {
-                                            try {
-                                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(res.fileUrl))
-                                                context.startActivity(intent)
-                                            } catch (e: Exception) {
-                                                Toast.makeText(context, "Could not open link", Toast.LENGTH_SHORT).show()
-                                            }
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    if (currentTeacher?.role == Role.ADMIN || currentTeacher?.id == res.authorId) {
+                                        IconButton(
+                                            onClick = { editingResource = res },
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Edit,
+                                                contentDescription = strings.editResource,
+                                                tint = SchoolPrimary,
+                                                modifier = Modifier.size(18.dp)
+                                            )
                                         }
-                                    ) {
-                                        Icon(Icons.Default.OpenInNew, contentDescription = "Open", tint = SchoolPrimary)
+                                    }
+                                    if (res.fileUrl.isNotEmpty()) {
+                                        IconButton(
+                                            onClick = {
+                                                try {
+                                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(res.fileUrl))
+                                                    context.startActivity(intent)
+                                                } catch (e: Exception) {
+                                                    Toast.makeText(context, "Could not open link", Toast.LENGTH_SHORT).show()
+                                                }
+                                            }
+                                        ) {
+                                            Icon(Icons.Default.OpenInNew, contentDescription = "Open", tint = SchoolPrimary)
+                                        }
                                     }
                                 }
                             }
@@ -185,6 +202,111 @@ fun TeacherResourcesScreen(
             }
         )
     }
+
+    editingResource?.let { res ->
+        EditResourceDialog(
+            resource = res,
+            strings = strings,
+            onDismiss = { editingResource = null },
+            onSave = { updatedRes ->
+                scope.launch {
+                    val r = firebaseManager.updateLearningResource(updatedRes)
+                    if (r.isSuccess) {
+                        Toast.makeText(context, strings.save, Toast.LENGTH_SHORT).show()
+                        editingResource = null
+                    } else {
+                        Toast.makeText(context, strings.error, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun EditResourceDialog(
+    resource: LearningResource,
+    strings: com.example.localization.AppStrings,
+    onDismiss: () -> Unit,
+    onSave: (LearningResource) -> Unit
+) {
+    var title by remember { mutableStateOf(resource.title) }
+    var level by remember { mutableStateOf(resource.level) }
+    var fileUrl by remember { mutableStateOf(resource.fileUrl) }
+    var selectedType by remember { mutableStateOf(resource.type) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(strings.editResource) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    label = { Text("Title") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilterChip(
+                        selected = selectedType == "SUMMARY",
+                        onClick = { selectedType = "SUMMARY" },
+                        label = { Text(strings.typeSummary) }
+                    )
+                    FilterChip(
+                        selected = selectedType == "EXERCISE",
+                        onClick = { selectedType = "EXERCISE" },
+                        label = { Text(strings.typeExercise) }
+                    )
+                    FilterChip(
+                        selected = selectedType == "EXAM",
+                        onClick = { selectedType = "EXAM" },
+                        label = { Text(strings.typePastExam) }
+                    )
+                }
+
+                OutlinedTextField(
+                    value = level,
+                    onValueChange = { level = it },
+                    label = { Text(strings.level) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = fileUrl,
+                    onValueChange = { fileUrl = it },
+                    label = { Text("Google Drive / PDF / File URL") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (title.isNotBlank()) {
+                        onSave(
+                            resource.copy(
+                                title = title.trim(),
+                                type = selectedType,
+                                level = level.trim(),
+                                fileUrl = fileUrl.trim()
+                            )
+                        )
+                    }
+                },
+                enabled = title.isNotBlank(),
+                shape = RoundedCornerShape(10.dp)
+            ) {
+                Text(strings.save)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(strings.cancel) }
+        }
+    )
 }
 
 @Composable

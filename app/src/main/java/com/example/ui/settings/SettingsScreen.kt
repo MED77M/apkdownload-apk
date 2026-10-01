@@ -1,9 +1,13 @@
 package com.example.ui.settings
 
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Build
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -25,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.firebase.FirebaseManager
 import com.example.data.model.Role
+import com.example.data.notification.SchoolNotificationManager
 import com.example.localization.AppLanguage
 import com.example.localization.Translations
 import com.example.ui.admin.DashboardActionRow
@@ -49,6 +54,19 @@ fun SettingsScreen(
     val currentUser = firebaseManager.currentUser
 
     val scrollState = rememberScrollState()
+
+    var notificationsGranted by remember {
+        mutableStateOf(SchoolNotificationManager.hasNotificationPermission(context))
+    }
+
+    val notificationLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted ->
+        notificationsGranted = isGranted
+        if (isGranted) {
+            Toast.makeText(context, strings.notificationsEnabled, Toast.LENGTH_SHORT).show()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -299,6 +317,204 @@ fun SettingsScreen(
                             }
                         }
                     }
+                }
+            }
+
+            // Notifications Status & Settings Card
+            Card(
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(
+                                        if (notificationsGranted) Color(0xFF16A34A).copy(alpha = 0.12f)
+                                        else SchoolAccentRed.copy(alpha = 0.12f)
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.Notifications,
+                                    contentDescription = null,
+                                    tint = if (notificationsGranted) Color(0xFF16A34A) else SchoolAccentRed,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = strings.notificationsTitle,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = strings.notificationsDesc,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        StatusBadge(
+                            text = if (notificationsGranted) strings.notificationsEnabled else strings.notificationsDisabled,
+                            color = if (notificationsGranted) Color(0xFF16A34A) else SchoolAccentRed
+                        )
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            if (!notificationsGranted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                Button(
+                                    onClick = {
+                                        notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = SchoolPrimary)
+                                ) {
+                                    Text(strings.enableNotifications, style = MaterialTheme.typography.labelMedium)
+                                }
+                            }
+
+                            FilledTonalButton(
+                                onClick = {
+                                    if (!notificationsGranted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                                        notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                                    } else {
+                                        SchoolNotificationManager.sendTestNotification(context)
+                                        Toast.makeText(context, strings.testNotification, Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(strings.testNotification, style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Factory Reset Card (Admin Only)
+            if (currentUser?.role == Role.ADMIN) {
+                var showResetConfirmDialog by remember { mutableStateOf(false) }
+                var isResetting by remember { mutableStateOf(false) }
+
+                Card(
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(42.dp)
+                                    .clip(CircleShape)
+                                    .background(SchoolAccentRed.copy(alpha = 0.12f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.RestartAlt,
+                                    contentDescription = null,
+                                    tint = SchoolAccentRed,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = strings.factoryResetTitle,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = SchoolAccentRed
+                                )
+                                Text(
+                                    text = strings.factoryResetDesc,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Button(
+                            onClick = { showResetConfirmDialog = true },
+                            colors = ButtonDefaults.buttonColors(containerColor = SchoolAccentRed),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth().testTag("btn_factory_reset")
+                        ) {
+                            Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(strings.factoryResetTitle)
+                        }
+                    }
+                }
+
+                if (showResetConfirmDialog) {
+                    AlertDialog(
+                        onDismissRequest = { if (!isResetting) showResetConfirmDialog = false },
+                        icon = {
+                            Icon(Icons.Default.Warning, contentDescription = null, tint = SchoolAccentRed, modifier = Modifier.size(32.dp))
+                        },
+                        title = {
+                            Text(strings.factoryResetConfirmTitle, fontWeight = FontWeight.Bold)
+                        },
+                        text = {
+                            Text(strings.factoryResetConfirmMessage)
+                        },
+                        confirmButton = {
+                            Button(
+                                onClick = {
+                                    isResetting = true
+                                    scope.launch {
+                                        val res = firebaseManager.resetDatabaseToBrandNew()
+                                        isResetting = false
+                                        showResetConfirmDialog = false
+                                        res.onSuccess {
+                                            Toast.makeText(context, strings.factoryResetSuccess, Toast.LENGTH_LONG).show()
+                                            onLogout()
+                                        }.onFailure { err ->
+                                            Toast.makeText(context, err.localizedMessage ?: err.message ?: strings.error, Toast.LENGTH_LONG).show()
+                                        }
+                                    }
+                                },
+                                enabled = !isResetting,
+                                colors = ButtonDefaults.buttonColors(containerColor = SchoolAccentRed)
+                            ) {
+                                Text(if (isResetting) strings.loading else strings.confirm)
+                            }
+                        },
+                        dismissButton = {
+                            TextButton(
+                                onClick = { showResetConfirmDialog = false },
+                                enabled = !isResetting
+                            ) {
+                                Text(strings.cancel)
+                            }
+                        }
+                    )
                 }
             }
 

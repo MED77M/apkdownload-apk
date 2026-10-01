@@ -15,12 +15,14 @@ enum class Role {
 data class TeacherPermissions(
     val canPublishResources: Boolean = true,
     val canEditGrades: Boolean = true,
-    val canSendAnnouncements: Boolean = true
+    val canSendAnnouncements: Boolean = true,
+    val canViewFinance: Boolean = false
 ) {
     fun toMap(): Map<String, Any> = mapOf(
         "canPublishResources" to canPublishResources,
         "canEditGrades" to canEditGrades,
-        "canSendAnnouncements" to canSendAnnouncements
+        "canSendAnnouncements" to canSendAnnouncements,
+        "canViewFinance" to canViewFinance
     )
 
     companion object {
@@ -29,7 +31,8 @@ data class TeacherPermissions(
             return TeacherPermissions(
                 canPublishResources = map["canPublishResources"] as? Boolean ?: true,
                 canEditGrades = map["canEditGrades"] as? Boolean ?: true,
-                canSendAnnouncements = map["canSendAnnouncements"] as? Boolean ?: true
+                canSendAnnouncements = map["canSendAnnouncements"] as? Boolean ?: true,
+                canViewFinance = map["canViewFinance"] as? Boolean ?: false
             )
         }
     }
@@ -170,9 +173,10 @@ data class AttendanceRecord(
     val presentStudentIds: List<String> = emptyList(),
     val absentStudentIds: List<String> = emptyList(),
     val lateStudentIds: List<String> = emptyList(),
-    val teacherId: String = ""
+    val teacherId: String = "",
+    val updatedAt: Long? = null
 ) {
-    fun toMap(): Map<String, Any> = mapOf(
+    fun toMap(): Map<String, Any?> = mapOf(
         "slotId" to slotId,
         "subjectName" to subjectName,
         "groupName" to groupName,
@@ -180,7 +184,8 @@ data class AttendanceRecord(
         "presentStudentIds" to presentStudentIds,
         "absentStudentIds" to absentStudentIds,
         "lateStudentIds" to lateStudentIds,
-        "teacherId" to teacherId
+        "teacherId" to teacherId,
+        "updatedAt" to updatedAt
     )
 }
 
@@ -195,9 +200,10 @@ data class LearningResource(
     val fileUrl: String = "",
     val authorId: String = "",
     val authorName: String = "",
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long? = null
 ) {
-    fun toMap(): Map<String, Any> = mapOf(
+    fun toMap(): Map<String, Any?> = mapOf(
         "title" to title,
         "type" to type,
         "subjectId" to subjectId,
@@ -207,7 +213,8 @@ data class LearningResource(
         "fileUrl" to fileUrl,
         "authorId" to authorId,
         "authorName" to authorName,
-        "createdAt" to createdAt
+        "createdAt" to createdAt,
+        "updatedAt" to updatedAt
     )
 }
 
@@ -222,9 +229,10 @@ data class Homework(
     val attachmentUrl: String = "",
     val authorTeacherId: String = "",
     val authorTeacherName: String = "",
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long? = null
 ) {
-    fun toMap(): Map<String, Any> = mapOf(
+    fun toMap(): Map<String, Any?> = mapOf(
         "title" to title,
         "description" to description,
         "deadline" to deadline,
@@ -234,7 +242,8 @@ data class Homework(
         "attachmentUrl" to attachmentUrl,
         "authorTeacherId" to authorTeacherId,
         "authorTeacherName" to authorTeacherName,
-        "createdAt" to createdAt
+        "createdAt" to createdAt,
+        "updatedAt" to updatedAt
     )
 }
 
@@ -272,9 +281,10 @@ data class GradeItem(
     val maxScore: Float = 20f,
     val comment: String = "",
     val date: String = "",
-    val teacherId: String = ""
+    val teacherId: String = "",
+    val updatedAt: Long? = null
 ) {
-    fun toMap(): Map<String, Any> = mapOf(
+    fun toMap(): Map<String, Any?> = mapOf(
         "studentId" to studentId,
         "studentName" to studentName,
         "subjectId" to subjectId,
@@ -284,29 +294,222 @@ data class GradeItem(
         "maxScore" to maxScore,
         "comment" to comment,
         "date" to date,
-        "teacherId" to teacherId
+        "teacherId" to teacherId,
+        "updatedAt" to updatedAt
     )
+}
+
+data class Enrollment(
+    val id: String = "",
+    val studentId: String = "",
+    val studentName: String = "",
+    val subjectId: String = "",
+    val subjectName: String = "",
+    val teacherId: String = "",
+    val teacherName: String = "",
+    val monthlyFee: Double = 0.0,
+    val amountPaid: Double = 0.0,
+    val amountRemaining: Double = 0.0,
+    val status: String = "active", // "active", "paused"
+    val period: String = "",
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+) {
+    fun toMap(): Map<String, Any> = mapOf(
+        "studentId" to studentId,
+        "studentName" to studentName,
+        "subjectId" to subjectId,
+        "subjectName" to subjectName,
+        "teacherId" to teacherId,
+        "teacherName" to teacherName,
+        "monthlyFee" to monthlyFee,
+        "amountPaid" to amountPaid,
+        "amountRemaining" to amountRemaining,
+        "status" to status,
+        "period" to period,
+        "createdAt" to createdAt,
+        "updatedAt" to updatedAt
+    )
+
+    companion object {
+        fun fromMap(id: String, map: Map<String, Any?>): Enrollment {
+            val fee = (map["monthlyFee"] as? Number)?.toDouble() ?: 0.0
+            val paid = (map["amountPaid"] as? Number)?.toDouble() ?: 0.0
+            val remaining = (map["amountRemaining"] as? Number)?.toDouble() ?: (fee - paid).coerceAtLeast(0.0)
+            return Enrollment(
+                id = id,
+                studentId = map["studentId"] as? String ?: "",
+                studentName = map["studentName"] as? String ?: "",
+                subjectId = map["subjectId"] as? String ?: "",
+                subjectName = map["subjectName"] as? String ?: "",
+                teacherId = map["teacherId"] as? String ?: "",
+                teacherName = map["teacherName"] as? String ?: "",
+                monthlyFee = fee,
+                amountPaid = paid,
+                amountRemaining = remaining,
+                status = map["status"] as? String ?: "active",
+                period = map["period"] as? String ?: "",
+                createdAt = (map["createdAt"] as? Number)?.toLong() ?: System.currentTimeMillis(),
+                updatedAt = (map["updatedAt"] as? Number)?.toLong() ?: System.currentTimeMillis()
+            )
+        }
+    }
+}
+
+data class TeacherSubjectShare(
+    val id: String = "",
+    val teacherId: String = "",
+    val teacherName: String = "",
+    val subjectId: String = "",
+    val subjectName: String = "",
+    val requestedPercentage: Double = 50.0,
+    val approvedPercentage: Double = 50.0,
+    val updatedAt: Long = System.currentTimeMillis()
+) {
+    val schoolPercentage: Double
+        get() = (100.0 - approvedPercentage).coerceIn(0.0, 100.0)
+
+    fun toMap(): Map<String, Any> = mapOf(
+        "teacherId" to teacherId,
+        "teacherName" to teacherName,
+        "subjectId" to subjectId,
+        "subjectName" to subjectName,
+        "requestedPercentage" to requestedPercentage,
+        "approvedPercentage" to approvedPercentage,
+        "updatedAt" to updatedAt
+    )
+
+    companion object {
+        fun fromMap(id: String, map: Map<String, Any?>): TeacherSubjectShare {
+            return TeacherSubjectShare(
+                id = id,
+                teacherId = map["teacherId"] as? String ?: "",
+                teacherName = map["teacherName"] as? String ?: "",
+                subjectId = map["subjectId"] as? String ?: "",
+                subjectName = map["subjectName"] as? String ?: "",
+                requestedPercentage = (map["requestedPercentage"] as? Number)?.toDouble() ?: 50.0,
+                approvedPercentage = (map["approvedPercentage"] as? Number)?.toDouble() ?: 50.0,
+                updatedAt = (map["updatedAt"] as? Number)?.toLong() ?: System.currentTimeMillis()
+            )
+        }
+    }
 }
 
 data class PaymentRecord(
     val id: String = "",
     val studentId: String = "",
     val studentName: String = "",
+    val enrollmentId: String = "",
+    val subjectId: String = "",
+    val subjectName: String = "",
+    val teacherId: String = "",
+    val teacherName: String = "",
     val amount: Double = 0.0,
+    val teacherShare: Double = 0.0,
+    val schoolShare: Double = 0.0,
+    val teacherPercentage: Double = 0.0,
     val month: String = "",
-    val status: String = "PAID", // PAID, PENDING, OVERDUE
+    val status: String = "PAID", // PAID, PARTIALLY_PAID, PENDING, OVERDUE
     val date: String = "",
-    val notes: String = ""
+    val notes: String = "",
+    val recordedBy: String = "",
+    val createdAt: Long = System.currentTimeMillis()
 ) {
     fun toMap(): Map<String, Any> = mapOf(
         "studentId" to studentId,
         "studentName" to studentName,
+        "enrollmentId" to enrollmentId,
+        "subjectId" to subjectId,
+        "subjectName" to subjectName,
+        "teacherId" to teacherId,
+        "teacherName" to teacherName,
         "amount" to amount,
+        "teacherShare" to teacherShare,
+        "schoolShare" to schoolShare,
+        "teacherPercentage" to teacherPercentage,
         "month" to month,
         "status" to status,
         "date" to date,
-        "notes" to notes
+        "notes" to notes,
+        "recordedBy" to recordedBy,
+        "createdAt" to createdAt
     )
+
+    companion object {
+        fun fromMap(id: String, map: Map<String, Any?>): PaymentRecord {
+            return PaymentRecord(
+                id = id,
+                studentId = map["studentId"] as? String ?: "",
+                studentName = map["studentName"] as? String ?: "",
+                enrollmentId = map["enrollmentId"] as? String ?: "",
+                subjectId = map["subjectId"] as? String ?: "",
+                subjectName = map["subjectName"] as? String ?: "",
+                teacherId = map["teacherId"] as? String ?: "",
+                teacherName = map["teacherName"] as? String ?: "",
+                amount = (map["amount"] as? Number)?.toDouble() ?: 0.0,
+                teacherShare = (map["teacherShare"] as? Number)?.toDouble() ?: 0.0,
+                schoolShare = (map["schoolShare"] as? Number)?.toDouble() ?: 0.0,
+                teacherPercentage = (map["teacherPercentage"] as? Number)?.toDouble() ?: 0.0,
+                month = map["month"] as? String ?: "",
+                status = map["status"] as? String ?: "PAID",
+                date = map["date"] as? String ?: "",
+                notes = map["notes"] as? String ?: "",
+                recordedBy = map["recordedBy"] as? String ?: "",
+                createdAt = (map["createdAt"] as? Number)?.toLong() ?: System.currentTimeMillis()
+            )
+        }
+    }
+}
+
+data class AuditLog(
+    val id: String = "",
+    val userId: String = "",
+    val userName: String = "",
+    val userRole: String = "",
+    val action: String = "EDIT",
+    val targetCollection: String = "",
+    val targetRecordId: String = "",
+    val recordTitle: String = "",
+    val oldValue: String = "",
+    val newValue: String = "",
+    val note: String = "",
+    val timestamp: Long = System.currentTimeMillis(),
+    val dateStr: String = ""
+) {
+    fun toMap(): Map<String, Any> = mapOf(
+        "userId" to userId,
+        "userName" to userName,
+        "userRole" to userRole,
+        "action" to action,
+        "targetCollection" to targetCollection,
+        "targetRecordId" to targetRecordId,
+        "recordTitle" to recordTitle,
+        "oldValue" to oldValue,
+        "newValue" to newValue,
+        "note" to note,
+        "timestamp" to timestamp,
+        "dateStr" to dateStr
+    )
+
+    companion object {
+        fun fromMap(id: String, map: Map<String, Any?>): AuditLog {
+            return AuditLog(
+                id = id,
+                userId = map["userId"] as? String ?: "",
+                userName = map["userName"] as? String ?: "",
+                userRole = map["userRole"] as? String ?: "",
+                action = map["action"] as? String ?: "EDIT",
+                targetCollection = map["targetCollection"] as? String ?: "",
+                targetRecordId = map["targetRecordId"] as? String ?: "",
+                recordTitle = map["recordTitle"] as? String ?: "",
+                oldValue = map["oldValue"] as? String ?: "",
+                newValue = map["newValue"] as? String ?: "",
+                note = map["note"] as? String ?: "",
+                timestamp = (map["timestamp"] as? Number)?.toLong() ?: System.currentTimeMillis(),
+                dateStr = map["dateStr"] as? String ?: ""
+            )
+        }
+    }
 }
 
 data class Announcement(
@@ -316,7 +519,8 @@ data class Announcement(
     val targetAudience: String = "ALL", // ALL, TEACHERS, STUDENTS, GROUP
     val targetGroupId: String? = null,
     val authorName: String = "",
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long? = null
 ) {
     fun toMap(): Map<String, Any?> = mapOf(
         "title" to title,
@@ -324,7 +528,8 @@ data class Announcement(
         "targetAudience" to targetAudience,
         "targetGroupId" to targetGroupId,
         "authorName" to authorName,
-        "createdAt" to createdAt
+        "createdAt" to createdAt,
+        "updatedAt" to updatedAt
     )
 }
 

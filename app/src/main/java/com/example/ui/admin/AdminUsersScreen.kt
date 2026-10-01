@@ -455,6 +455,7 @@ fun CreateUserDialog(
     var canPublish by remember { mutableStateOf(true) }
     var canGrades by remember { mutableStateOf(true) }
     var canAnnounce by remember { mutableStateOf(true) }
+    var canFinance by remember { mutableStateOf(false) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -554,6 +555,14 @@ fun CreateUserDialog(
                         Text(strings.permSendAnnouncements, style = MaterialTheme.typography.bodySmall)
                         Switch(checked = canAnnounce, onCheckedChange = { canAnnounce = it })
                     }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(strings.permViewFinance, style = MaterialTheme.typography.bodySmall)
+                        Switch(checked = canFinance, onCheckedChange = { canFinance = it })
+                    }
                 }
             }
         },
@@ -571,7 +580,8 @@ fun CreateUserDialog(
                             teacherPermissions = TeacherPermissions(
                                 canPublishResources = canPublish,
                                 canEditGrades = canGrades,
-                                canSendAnnouncements = canAnnounce
+                                canSendAnnouncements = canAnnounce,
+                                canViewFinance = canFinance
                             )
                         )
                         onCreate(newUser, password)
@@ -603,6 +613,7 @@ fun EditUserDialog(
     var canPublish by remember { mutableStateOf(user.teacherPermissions.canPublishResources) }
     var canGrades by remember { mutableStateOf(user.teacherPermissions.canEditGrades) }
     var canAnnounce by remember { mutableStateOf(user.teacherPermissions.canSendAnnouncements) }
+    var canFinance by remember { mutableStateOf(user.teacherPermissions.canViewFinance) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -655,6 +666,14 @@ fun EditUserDialog(
                         Text(strings.permSendAnnouncements, style = MaterialTheme.typography.bodySmall)
                         Switch(checked = canAnnounce, onCheckedChange = { canAnnounce = it })
                     }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(strings.permViewFinance, style = MaterialTheme.typography.bodySmall)
+                        Switch(checked = canFinance, onCheckedChange = { canFinance = it })
+                    }
                 }
             }
         },
@@ -667,7 +686,8 @@ fun EditUserDialog(
                         teacherPermissions = TeacherPermissions(
                             canPublishResources = canPublish,
                             canEditGrades = canGrades,
-                            canSendAnnouncements = canAnnounce
+                            canSendAnnouncements = canAnnounce,
+                            canViewFinance = canFinance
                         )
                     )
                     onSave(updated)

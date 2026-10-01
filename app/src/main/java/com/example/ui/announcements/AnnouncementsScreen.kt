@@ -52,6 +52,7 @@ fun AnnouncementsScreen(
             (currentUser?.role == Role.TEACHER && (currentUser.teacherPermissions.canSendAnnouncements))
 
     var showCreateDialog by remember { mutableStateOf(false) }
+    var editingAnnouncement by remember { mutableStateOf<Announcement?>(null) }
 
     Scaffold(
         topBar = {
@@ -119,24 +120,41 @@ fun AnnouncementsScreen(
                                             style = MaterialTheme.typography.titleMedium,
                                             fontWeight = FontWeight.Bold
                                         )
+                                        val editedText = if (item.updatedAt != null) " • ✏️ ${strings.editedBadge}" else ""
                                         Text(
-                                            text = "By ${item.authorName} • 📅 $dateStr",
+                                            text = "By ${item.authorName} • 📅 $dateStr$editedText",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
                                     }
-                                    StatusBadge(
-                                        text = when (item.targetAudience) {
-                                            "TEACHERS" -> strings.audienceTeachers
-                                            "STUDENTS" -> strings.audienceStudents
-                                            else -> strings.audienceAll
-                                        },
-                                        color = when (item.targetAudience) {
-                                            "TEACHERS" -> SchoolSecondary
-                                            "STUDENTS" -> SchoolPrimary
-                                            else -> SchoolWarning
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        StatusBadge(
+                                            text = when (item.targetAudience) {
+                                                "TEACHERS" -> strings.audienceTeachers
+                                                "STUDENTS" -> strings.audienceStudents
+                                                else -> strings.audienceAll
+                                            },
+                                            color = when (item.targetAudience) {
+                                                "TEACHERS" -> SchoolSecondary
+                                                "STUDENTS" -> SchoolPrimary
+                                                else -> SchoolWarning
+                                            }
+                                        )
+                                        if (canCreate) {
+                                            Spacer(modifier = Modifier.width(4.dp))
+                                            IconButton(
+                                                onClick = { editingAnnouncement = item },
+                                                modifier = Modifier.size(36.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.Edit,
+                                                    contentDescription = strings.editAnnouncement,
+                                                    tint = SchoolPrimary,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
                                         }
-                                    )
+                                    }
                                 }
                                 Spacer(modifier = Modifier.height(10.dp))
                                 Text(
@@ -216,6 +234,81 @@ fun AnnouncementsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showCreateDialog = false }) { Text(strings.cancel) }
+            }
+        )
+    }
+
+    editingAnnouncement?.let { ann ->
+        var editTitle by remember { mutableStateOf(ann.title) }
+        var editBody by remember { mutableStateOf(ann.body) }
+        var editAudience by remember { mutableStateOf(ann.targetAudience) }
+
+        AlertDialog(
+            onDismissRequest = { editingAnnouncement = null },
+            title = { Text(strings.editAnnouncement) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    OutlinedTextField(
+                        value = editTitle,
+                        onValueChange = { editTitle = it },
+                        label = { Text("Title") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = editBody,
+                        onValueChange = { editBody = it },
+                        label = { Text("Message Body") },
+                        maxLines = 6,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        FilterChip(
+                            selected = editAudience == "ALL",
+                            onClick = { editAudience = "ALL" },
+                            label = { Text(strings.audienceAll) }
+                        )
+                        FilterChip(
+                            selected = editAudience == "TEACHERS",
+                            onClick = { editAudience = "TEACHERS" },
+                            label = { Text(strings.audienceTeachers) }
+                        )
+                        FilterChip(
+                            selected = editAudience == "STUDENTS",
+                            onClick = { editAudience = "STUDENTS" },
+                            label = { Text(strings.audienceStudents) }
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (editTitle.isNotBlank() && editBody.isNotBlank()) {
+                            scope.launch {
+                                val res = firebaseManager.updateAnnouncement(
+                                    ann.copy(
+                                        title = editTitle.trim(),
+                                        body = editBody.trim(),
+                                        targetAudience = editAudience
+                                    )
+                                )
+                                if (res.isSuccess) {
+                                    Toast.makeText(context, strings.save, Toast.LENGTH_SHORT).show()
+                                    editingAnnouncement = null
+                                } else {
+                                    Toast.makeText(context, strings.error, Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    },
+                    enabled = editTitle.isNotBlank() && editBody.isNotBlank()
+                ) {
+                    Text(strings.save)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { editingAnnouncement = null }) { Text(strings.cancel) }
             }
         )
     }

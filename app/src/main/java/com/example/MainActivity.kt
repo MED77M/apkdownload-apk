@@ -1,16 +1,22 @@
 package com.example
 
+import android.Manifest
+import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
@@ -19,6 +25,8 @@ import com.example.data.firebase.FirebaseManager
 import com.example.data.model.Role
 import com.example.data.model.SchoolUser
 import com.example.data.model.TimetableSlot
+import com.example.data.notification.RealtimeNotificationObserver
+import com.example.data.notification.SchoolNotificationManager
 import com.example.localization.AppLanguage
 import com.example.localization.Translations
 import com.example.ui.admin.*
@@ -44,12 +52,14 @@ sealed class Screen {
     data object AdminUsers : Screen()
     data object AdminTimetable : Screen()
     data object AdminFinance : Screen()
+    data object AdminActivityLog : Screen()
     data object AdminReports : Screen()
     data object Announcements : Screen()
     data class TeacherAttendance(val slot: TimetableSlot? = null) : Screen()
     data object TeacherResources : Screen()
     data object TeacherHomework : Screen()
     data object TeacherGrades : Screen()
+    data object TeacherFinance : Screen()
     data object StudentTimetable : Screen()
     data object StudentHomework : Screen()
     data object StudentGrades : Screen()
@@ -67,6 +77,7 @@ class MainActivity : ComponentActivity() {
         val firebaseManager = FirebaseManager.getInstance(applicationContext)
 
         setContent {
+            val context = LocalContext.current
             val savedLangCode = remember { firebaseManager.getSavedLanguage() }
             var currentLanguage by remember { mutableStateOf(AppLanguage.fromCode(savedLangCode)) }
             val strings = Translations.get(currentLanguage)
@@ -75,16 +86,63 @@ class MainActivity : ComponentActivity() {
             var currentUser by remember { mutableStateOf(firebaseManager.currentUser) }
             var currentScreen by remember { mutableStateOf<Screen>(Screen.Login) }
 
-            // Check auto login on launch
+            // Notification permission request for Android 13+
+            val notificationPermissionLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.RequestPermission()
+            ) { isGranted ->
+                if (isGranted) {
+                    currentUser?.let { user ->
+                        SchoolNotificationManager.fetchAndSaveFcmToken(context, user)
+                    }
+                }
+            }
+
+            // Check auto login on launch or perform clean reset to brand new
             LaunchedEffect(Unit) {
-                val autoUser = firebaseManager.checkAutoLogin()
-                if (autoUser != null) {
-                    currentUser = autoUser
-                    currentScreen = Screen.Main(0)
+                if (!firebaseManager.isBrandNewResetDone()) {
+                    firebaseManager.resetDatabaseToBrandNew()
+                    firebaseManager.setBrandNewResetDone()
+                    currentUser = null
+                    currentScreen = Screen.Login
+                } else {
+                    val autoUser = firebaseManager.checkAutoLogin()
+                    if (autoUser != null) {
+                        currentUser = autoUser
+                        currentScreen = Screen.Main(0)
+                    }
+                }
+            }
+
+            // Start Realtime Notification Observer and request permission when user is logged in
+            LaunchedEffect(currentUser) {
+                currentUser?.let { user ->
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        if (!SchoolNotificationManager.hasNotificationPermission(context)) {
+                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    }
+                    RealtimeNotificationObserver.start(context.applicationContext, user)
+                    SchoolNotificationManager.fetchAndSaveFcmToken(context.applicationContext, user)
+                }
+            }
+
+            // Handle incoming notification intent routing (e.g. tapping on a notification)
+            LaunchedEffect(intent) {
+                val route = intent?.getStringExtra("route")
+                if (route == "announcements") {
+                    currentScreen = Screen.Announcements
+                } else if (route == "chat") {
+                    val convId = intent?.getStringExtra("conversationId") ?: ""
+                    val title = intent?.getStringExtra("conversationTitle") ?: "محادثة"
+                    val isGroup = intent?.getBooleanExtra("isGroup", false) ?: false
+                    if (convId.isNotBlank()) {
+                        currentScreen = Screen.ChatConversation(convId, title, isGroup)
+                    }
                 }
             }
 
             fun logout() {
+                RealtimeNotificationObserver.stop()
                 firebaseManager.logout()
                 currentUser = null
                 currentScreen = Screen.Login
@@ -104,11 +162,7 @@ class MainActivity : ComponentActivity() {
                                     onLanguageChange = { currentLanguage = it },
                                     onLoginSuccess = { user ->
                                         currentUser = user
-                                        if (user.role == Role.ADMIN && (user.needsPasswordChange || (user.username == "admin" && user.recoveryEmail.isBlank()))) {
-                                            currentScreen = Screen.SecureAccount
-                                        } else {
-                                            currentScreen = Screen.Main(0)
-                                        }
+                                        currentScreen = Screen.Main(0)
                                     }
                                 )
                             }
@@ -332,6 +386,7 @@ class MainActivity : ComponentActivity() {
                                                         onNavigateToHomework = { activeTab = 2 },
                                                         onNavigateToGrades = { currentScreen = Screen.TeacherGrades },
                                                         onNavigateToChat = { activeTab = 3 },
+                                                        onNavigateToFinance = { currentScreen = Screen.TeacherFinance },
                                                         onLogout = { logout() }
                                                     )
                                                     1 -> TeacherAttendanceScreen(
@@ -416,6 +471,27 @@ class MainActivity : ComponentActivity() {
                             is Screen.AdminFinance -> {
                                 BackHandler { currentScreen = Screen.Main(0) }
                                 AdminFinanceScreen(
+                                    firebaseManager = firebaseManager,
+                                    currentLanguage = currentLanguage,
+                                    onLanguageChange = { currentLanguage = it },
+                                    onBack = { currentScreen = Screen.Main(0) },
+                                    onNavigateToActivityLog = { currentScreen = Screen.AdminActivityLog }
+                                )
+                            }
+
+                            is Screen.AdminActivityLog -> {
+                                BackHandler { currentScreen = Screen.AdminFinance }
+                                AdminActivityLogScreen(
+                                    firebaseManager = firebaseManager,
+                                    currentLanguage = currentLanguage,
+                                    onLanguageChange = { currentLanguage = it },
+                                    onBack = { currentScreen = Screen.AdminFinance }
+                                )
+                            }
+
+                            is Screen.TeacherFinance -> {
+                                BackHandler { currentScreen = Screen.Main(0) }
+                                TeacherFinanceScreen(
                                     firebaseManager = firebaseManager,
                                     currentLanguage = currentLanguage,
                                     onLanguageChange = { currentLanguage = it },

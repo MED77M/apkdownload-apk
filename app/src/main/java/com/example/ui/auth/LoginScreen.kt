@@ -50,7 +50,7 @@ fun LoginScreen(
     val strings = Translations.get(currentLanguage)
     val scope = rememberCoroutineScope()
 
-    var username by remember { mutableStateOf(firebaseManager.getLastUsername()) }
+    var username by remember { mutableStateOf(firebaseManager.getLastUsername().ifBlank { "admin" }) }
     var password by remember { mutableStateOf("") }
     var rememberMe by remember { mutableStateOf(firebaseManager.isRememberMe()) }
     var passwordVisible by remember { mutableStateOf(false) }

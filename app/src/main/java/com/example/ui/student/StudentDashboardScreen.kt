@@ -21,6 +21,7 @@ import com.example.ui.common.AppHeader
 import com.example.ui.common.StatCard
 import com.example.ui.theme.SchoolPrimary
 import com.example.ui.theme.SchoolSecondary
+import com.example.ui.theme.SchoolAccentRed
 import com.example.ui.theme.SchoolWarning
 
 @Composable
@@ -43,6 +44,8 @@ fun StudentDashboardScreen(
     val myGrades by firebaseManager.observeGrades(studentId = currentStudent?.id).collectAsState(initial = emptyList())
     val attendanceRecords by firebaseManager.observeAttendance().collectAsState(initial = emptyList())
     val announcements by firebaseManager.observeAnnouncements().collectAsState(initial = emptyList())
+    val myEnrollments by firebaseManager.observeEnrollments(studentId = currentStudent?.id).collectAsState(initial = emptyList())
+    val myPayments by firebaseManager.observePayments(studentId = currentStudent?.id).collectAsState(initial = emptyList())
 
     // Student attendance rate
     val attendanceRate = remember(attendanceRecords, currentStudent) {
@@ -140,6 +143,138 @@ fun StudentDashboardScreen(
                     color = Color(0xFF16A34A),
                     modifier = Modifier.weight(1f)
                 )
+            }
+
+            // My Fees Section (Multi-Subject Breakdown - STRICT PRIVACY)
+            if (myEnrollments.isNotEmpty()) {
+                Text(
+                    text = strings.myFeesTitle,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+
+                myEnrollments.forEach { enroll ->
+                    val isPaid = enroll.amountRemaining <= 0.0
+                    val isPartial = enroll.amountPaid > 0.0 && enroll.amountRemaining > 0.0
+                    val statusColor = when {
+                        isPaid -> Color(0xFF16A34A)
+                        isPartial -> SchoolPrimary
+                        else -> SchoolAccentRed
+                    }
+
+                    val subjectPayments = remember(myPayments, enroll) {
+                        myPayments.filter { it.enrollmentId == enroll.id || it.subjectId == enroll.subjectId }
+                    }
+
+                    var showHistory by remember { mutableStateOf(false) }
+
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = enroll.subjectName,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = "${strings.roleTeacher}: ${enroll.teacherName}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = SchoolPrimary
+                                    )
+                                }
+
+                                com.example.ui.common.StatusBadge(
+                                    text = when {
+                                        isPaid -> strings.statusPaid
+                                        isPartial -> strings.statusPartiallyPaid
+                                        else -> strings.statusUnpaid
+                                    },
+                                    color = statusColor
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Three columns: Fee, Paid, Remaining (NO teacher/school shares ever shown)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column {
+                                    Text(strings.monthlyFeeAmount, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                                    Text("${enroll.monthlyFee.toInt()} ${strings.currencySymbol}", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
+                                }
+                                Column {
+                                    Text(strings.amountPaidLabel, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                                    Text("${enroll.amountPaid.toInt()} ${strings.currencySymbol}", fontWeight = FontWeight.Bold, color = SchoolPrimary, style = MaterialTheme.typography.bodyMedium)
+                                }
+                                Column {
+                                    Text(strings.amountRemainingLabel, style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                                    Text(
+                                        "${enroll.amountRemaining.toInt()} ${strings.currencySymbol}",
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (enroll.amountRemaining > 0) SchoolAccentRed else Color(0xFF16A34A),
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                }
+                            }
+
+                            // Payment History Toggle
+                            if (subjectPayments.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End
+                                ) {
+                                    TextButton(onClick = { showHistory = !showHistory }) {
+                                        Text(
+                                            if (showHistory) "Hide History ▲" else "View Payment History (${subjectPayments.size}) ▼",
+                                            style = MaterialTheme.typography.labelSmall
+                                        )
+                                    }
+                                }
+
+                                if (showHistory) {
+                                    Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        subjectPayments.forEach { p ->
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(vertical = 2.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Text(
+                                                    text = "🗓️ ${p.date} (${p.month})",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = Color.DarkGray
+                                                )
+                                                Text(
+                                                    text = "${p.amount.toInt()} ${strings.currencySymbol}",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = SchoolPrimary
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             // Navigation Actions

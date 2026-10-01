@@ -98,9 +98,37 @@ service cloud.firestore {
       allow write: if (isTeacher() && getUserData().teacherPermissions.canEditGrades == true) || isAdmin();
     }
 
-    // Finance & Payments (Admin only)
+    // Finance, Multi-Subject Enrollments & Payments
+    match /enrollments/{enrollmentId} {
+      allow read: if isAdmin() ||
+        (isStudent() && resource.data.studentId == request.auth.uid) ||
+        (isTeacher() && getUserData().teacherPermissions.canViewFinance == true && resource.data.teacherId == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
     match /payments/{paymentId} {
-      allow read, write: if isAdmin();
+      allow read: if isAdmin() ||
+        (isStudent() && resource.data.studentId == request.auth.uid) ||
+        (isTeacher() && getUserData().teacherPermissions.canViewFinance == true && resource.data.teacherId == request.auth.uid);
+      allow write: if isAdmin();
+    }
+
+    match /teacher_shares/{shareId} {
+      allow read: if isAdmin() ||
+        (isTeacher() && resource.data.teacherId == request.auth.uid);
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (
+        isTeacher() &&
+        resource.data.teacherId == request.auth.uid &&
+        request.resource.data.approvedPercentage == resource.data.approvedPercentage
+      );
+    }
+
+    // Audit Logs (Immutable Activity Trail)
+    match /auditLogs/{logId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() || isTeacher();
+      allow update, delete: if false; // Immutable
     }
 
     // Announcements

@@ -49,6 +49,15 @@ fun TeacherAttendanceScreen(
     var selectedSlot by remember { mutableStateOf(initialSlot ?: slots.firstOrNull()) }
 
     val allStudents by firebaseManager.observeUsers(Role.STUDENT).collectAsState(initial = emptyList())
+    val allAttendance by firebaseManager.observeAttendance().collectAsState(initial = emptyList())
+
+    val todayDate = remember {
+        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+    }
+
+    val existingRecord = remember(allAttendance, selectedSlot, todayDate) {
+        allAttendance.firstOrNull { it.slotId == selectedSlot?.id && it.date == todayDate }
+    }
 
     // Filter students by slot's group if defined, else all students
     val studentsInGroup = remember(allStudents, selectedSlot) {
@@ -62,25 +71,31 @@ fun TeacherAttendanceScreen(
     // Attendance state map: studentId -> "PRESENT" | "ABSENT" | "LATE"
     val attendanceMap = remember { mutableStateMapOf<String, String>() }
 
-    // Initialize all to PRESENT by default
-    LaunchedEffect(studentsInGroup) {
-        studentsInGroup.forEach { s ->
-            if (!attendanceMap.containsKey(s.id)) {
-                attendanceMap[s.id] = "PRESENT"
+    // Initialize with existing record if available, else PRESENT by default
+    LaunchedEffect(existingRecord, studentsInGroup) {
+        if (existingRecord != null) {
+            existingRecord.presentStudentIds.forEach { attendanceMap[it] = "PRESENT" }
+            existingRecord.absentStudentIds.forEach { attendanceMap[it] = "ABSENT" }
+            existingRecord.lateStudentIds.forEach { attendanceMap[it] = "LATE" }
+        } else {
+            studentsInGroup.forEach { s ->
+                if (!attendanceMap.containsKey(s.id)) {
+                    attendanceMap[s.id] = "PRESENT"
+                }
             }
         }
     }
 
     var isSaving by remember { mutableStateOf(false) }
-    val todayDate = remember {
-        SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-    }
 
     Scaffold(
         topBar = {
             AppHeader(
                 title = strings.attendanceTitle,
-                subtitle = selectedSlot?.let { "${it.subjectName} (${it.groupName})" } ?: strings.markAttendance,
+                subtitle = selectedSlot?.let {
+                    val editTag = if (existingRecord != null) " • ✏️ ${strings.editedBadge}" else ""
+                    "${it.subjectName} (${it.groupName})$editTag"
+                } ?: strings.markAttendance,
                 currentLanguage = currentLanguage,
                 onLanguageChange = onLanguageChange,
                 navigationIcon = {
@@ -98,7 +113,7 @@ fun TeacherAttendanceScreen(
             ) {
                 Box(modifier = Modifier.padding(16.dp)) {
                     AppButton(
-                        text = strings.save,
+                        text = if (existingRecord != null) strings.editAttendance else strings.save,
                         isLoading = isSaving,
                         icon = Icons.Default.Save,
                         onClick = {
@@ -109,6 +124,7 @@ fun TeacherAttendanceScreen(
                                 val lateIds = attendanceMap.filter { it.value == "LATE" }.keys.toList()
 
                                 val record = AttendanceRecord(
+                                    id = existingRecord?.id ?: "",
                                     slotId = selectedSlot!!.id,
                                     subjectName = selectedSlot!!.subjectName,
                                     groupName = selectedSlot!!.groupName,
@@ -116,7 +132,8 @@ fun TeacherAttendanceScreen(
                                     presentStudentIds = presentIds,
                                     absentStudentIds = absentIds,
                                     lateStudentIds = lateIds,
-                                    teacherId = currentTeacher?.id ?: ""
+                                    teacherId = currentTeacher?.id ?: "",
+                                    updatedAt = if (existingRecord != null) System.currentTimeMillis() else null
                                 )
 
                                 scope.launch {

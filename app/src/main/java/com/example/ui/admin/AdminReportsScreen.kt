@@ -122,17 +122,17 @@ fun AdminReportsScreen(
 
             ReportCard(
                 title = strings.financeReport,
-                description = "Total Collected: ${totalPaid.toInt()} DZD • Total Overdue: ${totalOverdue.toInt()} DZD",
+                description = "${strings.totalCollected}: ${totalPaid.toInt()} ${strings.currencySymbol} • ${strings.totalOverdue}: ${totalOverdue.toInt()} ${strings.currencySymbol}",
                 icon = Icons.Default.PriceCheck,
                 color = SchoolSecondary,
                 onExportText = {
                     val sb = StringBuilder()
                     sb.append("=== science.est.center - ${strings.financeReport} ===\n\n")
-                    sb.append("Total Payments: ${payments.size}\n")
-                    sb.append("Total Collected: ${totalPaid.toInt()} DZD\n")
-                    sb.append("Total Overdue: ${totalOverdue.toInt()} DZD\n\n")
+                    sb.append("${strings.financeTitle}: ${payments.size}\n")
+                    sb.append("${strings.totalCollected}: ${totalPaid.toInt()} ${strings.currencySymbol}\n")
+                    sb.append("${strings.totalOverdue}: ${totalOverdue.toInt()} ${strings.currencySymbol}\n\n")
                     payments.forEachIndexed { i, p ->
-                        sb.append("${i + 1}. ${p.studentName} - Month: ${p.month} | Amount: ${p.amount.toInt()} DZD | Status: ${p.status} (${p.date})\n")
+                        sb.append("${i + 1}. ${p.studentName} - Month: ${p.month} | Amount: ${p.amount.toInt()} ${strings.currencySymbol} | Status: ${p.status} (${p.date})\n")
                     }
                     shareReport(strings.financeReport, sb.toString())
                 }
