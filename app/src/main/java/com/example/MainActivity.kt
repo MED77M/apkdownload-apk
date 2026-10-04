@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
@@ -27,7 +28,9 @@ import com.example.data.firebase.FirebaseManager
 import com.example.data.model.Role
 import com.example.data.model.SchoolUser
 import com.example.data.model.TimetableSlot
+import com.example.data.notification.BadgeManager
 import com.example.data.notification.RealtimeNotificationObserver
+import com.example.data.notification.SchoolBackgroundNotificationService
 import com.example.data.notification.SchoolNotificationManager
 import com.example.localization.AppLanguage
 import com.example.localization.Translations
@@ -145,10 +148,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // Start Realtime Notification Observer when user is logged in
+            // Start Realtime Notification Observer and Background Service when user is logged in
             LaunchedEffect(currentUser) {
                 currentUser?.let { user ->
                     RealtimeNotificationObserver.start(context.applicationContext, user)
+                    SchoolBackgroundNotificationService.startService(context.applicationContext)
                 }
             }
 
@@ -158,9 +162,11 @@ class MainActivity : ComponentActivity() {
                 val target = currentIntent ?: return@LaunchedEffect
                 val route = target.getStringExtra("route")
                 if (route == "announcements") {
+                    BadgeManager.clearAnnouncementsBadge()
                     currentScreen = Screen.Announcements
                     pendingIntentState.value = null
                 } else if (route == "chat") {
+                    BadgeManager.clearMessagesBadge()
                     val convId = target.getStringExtra("conversationId") ?: ""
                     val title = target.getStringExtra("conversationTitle") ?: "محادثة"
                     val isGroup = target.getBooleanExtra("isGroup", false)
@@ -172,7 +178,10 @@ class MainActivity : ComponentActivity() {
             }
 
             fun logout() {
+                SchoolBackgroundNotificationService.stopService(context.applicationContext)
                 RealtimeNotificationObserver.stop()
+                BadgeManager.clearMessagesBadge()
+                BadgeManager.clearAnnouncementsBadge()
                 firebaseManager.logout()
                 currentUser = null
                 currentScreen = Screen.Login
@@ -231,6 +240,13 @@ class MainActivity : ComponentActivity() {
                             is Screen.Main -> {
                                 val role = currentUser?.role ?: Role.STUDENT
                                 var activeTab by remember(screen.tabIndex) { mutableStateOf(screen.tabIndex) }
+                                val hasUnreadMessages by BadgeManager.hasUnreadMessages.collectAsState()
+
+                                LaunchedEffect(activeTab) {
+                                    if (activeTab == 3) {
+                                        BadgeManager.clearMessagesBadge()
+                                    }
+                                }
 
                                 BackHandler(enabled = activeTab != 0) {
                                     activeTab = 0
@@ -268,8 +284,24 @@ class MainActivity : ComponentActivity() {
                                                     )
                                                     NavigationBarItem(
                                                         selected = activeTab == 3,
-                                                        onClick = { activeTab = 3 },
-                                                        icon = { Icon(Icons.Default.Chat, contentDescription = null) },
+                                                        onClick = {
+                                                            activeTab = 3
+                                                            BadgeManager.clearMessagesBadge()
+                                                        },
+                                                        icon = {
+                                                            BadgedBox(
+                                                                badge = {
+                                                                    if (hasUnreadMessages) {
+                                                                        Badge(
+                                                                            containerColor = Color(0xFFEF4444),
+                                                                            modifier = Modifier.size(9.dp)
+                                                                        )
+                                                                    }
+                                                                }
+                                                            ) {
+                                                                Icon(Icons.Default.Chat, contentDescription = strings.navChat)
+                                                            }
+                                                        },
                                                         label = { Text(strings.navChat) },
                                                         modifier = Modifier.testTag("nav_tab_chat")
                                                     )
@@ -306,8 +338,24 @@ class MainActivity : ComponentActivity() {
                                                     )
                                                     NavigationBarItem(
                                                         selected = activeTab == 3,
-                                                        onClick = { activeTab = 3 },
-                                                        icon = { Icon(Icons.Default.Chat, contentDescription = null) },
+                                                        onClick = {
+                                                            activeTab = 3
+                                                            BadgeManager.clearMessagesBadge()
+                                                        },
+                                                        icon = {
+                                                            BadgedBox(
+                                                                badge = {
+                                                                    if (hasUnreadMessages) {
+                                                                        Badge(
+                                                                            containerColor = Color(0xFFEF4444),
+                                                                            modifier = Modifier.size(9.dp)
+                                                                        )
+                                                                    }
+                                                                }
+                                                            ) {
+                                                                Icon(Icons.Default.Chat, contentDescription = strings.navChat)
+                                                            }
+                                                        },
                                                         label = { Text(strings.navChat) },
                                                         modifier = Modifier.testTag("nav_tab_chat")
                                                     )
@@ -344,8 +392,24 @@ class MainActivity : ComponentActivity() {
                                                     )
                                                     NavigationBarItem(
                                                         selected = activeTab == 3,
-                                                        onClick = { activeTab = 3 },
-                                                        icon = { Icon(Icons.Default.Chat, contentDescription = null) },
+                                                        onClick = {
+                                                            activeTab = 3
+                                                            BadgeManager.clearMessagesBadge()
+                                                        },
+                                                        icon = {
+                                                            BadgedBox(
+                                                                badge = {
+                                                                    if (hasUnreadMessages) {
+                                                                        Badge(
+                                                                            containerColor = Color(0xFFEF4444),
+                                                                            modifier = Modifier.size(9.dp)
+                                                                        )
+                                                                    }
+                                                                }
+                                                            ) {
+                                                                Icon(Icons.Default.Chat, contentDescription = strings.navChat)
+                                                            }
+                                                        },
                                                         label = { Text(strings.navChat) },
                                                         modifier = Modifier.testTag("nav_tab_chat")
                                                     )
@@ -409,7 +473,7 @@ class MainActivity : ComponentActivity() {
                                                 }
                                             }
 
-                                            Role.TEACHER -> {
+                                             Role.TEACHER -> {
                                                 when (activeTab) {
                                                     0 -> TeacherDashboardScreen(
                                                         firebaseManager = firebaseManager,
@@ -423,6 +487,7 @@ class MainActivity : ComponentActivity() {
                                                         onNavigateToGrades = { currentScreen = Screen.TeacherGrades },
                                                         onNavigateToChat = { activeTab = 3 },
                                                         onNavigateToFinance = { currentScreen = Screen.TeacherFinance },
+                                                        onNavigateToAnnouncements = { currentScreen = Screen.Announcements },
                                                         onLogout = { logout() }
                                                     )
                                                     1 -> TeacherAttendanceScreen(
@@ -546,6 +611,9 @@ class MainActivity : ComponentActivity() {
                             }
 
                             is Screen.Announcements -> {
+                                LaunchedEffect(Unit) {
+                                    BadgeManager.clearAnnouncementsBadge()
+                                }
                                 BackHandler { currentScreen = Screen.Main(0) }
                                 AnnouncementsScreen(
                                     firebaseManager = firebaseManager,
@@ -607,6 +675,9 @@ class MainActivity : ComponentActivity() {
                             }
 
                             is Screen.ChatConversation -> {
+                                LaunchedEffect(Unit) {
+                                    BadgeManager.clearMessagesBadge()
+                                }
                                 BackHandler { currentScreen = Screen.Main(3) }
                                 ChatConversationScreen(
                                     conversationId = screen.convId,
@@ -620,6 +691,9 @@ class MainActivity : ComponentActivity() {
                             }
 
                             is Screen.SubjectQa -> {
+                                LaunchedEffect(Unit) {
+                                    BadgeManager.clearMessagesBadge()
+                                }
                                 BackHandler { currentScreen = Screen.Main(3) }
                                 SubjectQaScreen(
                                     firebaseManager = firebaseManager,

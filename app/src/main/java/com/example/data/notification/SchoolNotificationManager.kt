@@ -25,6 +25,7 @@ object SchoolNotificationManager {
     const val CHANNEL_MESSAGES_ID = "school_messages_channel"
     const val CHANNEL_ANNOUNCEMENTS_ID = "school_announcements_channel"
     const val CHANNEL_GENERAL_ID = "school_general_channel"
+    const val CHANNEL_BACKGROUND_SERVICE_ID = "school_background_sync_channel"
 
     private val notificationIdCounter = AtomicInteger(1000)
 
@@ -72,7 +73,19 @@ object SchoolNotificationManager {
                 description = "إشعارات عامة وتنبيهات الحصص"
             }
 
-            notificationManager.createNotificationChannels(listOf(messagesChannel, announcementsChannel, generalChannel))
+            // 4. Background Service Sync Channel
+            val backgroundChannel = NotificationChannel(
+                CHANNEL_BACKGROUND_SERVICE_ID,
+                "مزامنة الإشعارات في الخلفية / Background Notifications",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "الحفاظ على استقبال الرسائل والإعلانات حتى بعد إغلاق التطبيق"
+                setShowBadge(false)
+            }
+
+            notificationManager.createNotificationChannels(
+                listOf(messagesChannel, announcementsChannel, generalChannel, backgroundChannel)
+            )
         }
     }
 

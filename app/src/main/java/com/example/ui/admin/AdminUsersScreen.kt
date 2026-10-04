@@ -249,13 +249,15 @@ fun AdminUsersScreen(
             role = currentRole,
             strings = strings,
             onDismiss = { showAddDialog = false },
-            onCreate = { newUser, password ->
+            onCreate = { newUser, password, onComplete ->
                 scope.launch {
                     val res = firebaseManager.createUser(newUser, password)
                     res.onSuccess { createdUser ->
+                        onComplete(true)
                         showAddDialog = false
                         newlyCreatedCredentials = Pair(createdUser.username, password)
                     }.onFailure { err ->
+                        onComplete(false)
                         Toast.makeText(context, err.message ?: strings.error, Toast.LENGTH_LONG).show()
                     }
                 }
@@ -485,13 +487,14 @@ fun CreateUserDialog(
     role: Role,
     strings: com.example.localization.AppStrings,
     onDismiss: () -> Unit,
-    onCreate: (SchoolUser, String) -> Unit
+    onCreate: (SchoolUser, String, (Boolean) -> Unit) -> Unit
 ) {
     var fullName by remember { mutableStateOf("") }
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf(generateRandomPassword()) }
     var phone by remember { mutableStateOf("") }
     var recoveryEmail by remember { mutableStateOf("") }
+    var isSubmitting by remember { mutableStateOf(false) }
 
     // Teacher permissions
     var canPublish by remember { mutableStateOf(true) }
@@ -500,7 +503,7 @@ fun CreateUserDialog(
     var canFinance by remember { mutableStateOf(false) }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = { if (!isSubmitting) onDismiss() },
         title = {
             Text(
                 when (role) {
@@ -611,7 +614,8 @@ fun CreateUserDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (fullName.isNotBlank() && username.isNotBlank() && password.isNotBlank()) {
+                    if (!isSubmitting && fullName.isNotBlank() && username.isNotBlank() && password.isNotBlank()) {
+                        isSubmitting = true
                         val newUser = SchoolUser(
                             username = username.trim().lowercase(),
                             fullName = fullName.trim(),
@@ -626,17 +630,32 @@ fun CreateUserDialog(
                                 canViewFinance = canFinance
                             )
                         )
-                        onCreate(newUser, password)
+                        onCreate(newUser, password) { success ->
+                            if (!success) {
+                                isSubmitting = false
+                            }
+                        }
                     }
                 },
-                enabled = fullName.isNotBlank() && username.isNotBlank() && password.isNotBlank() && (role != Role.ADMIN || recoveryEmail.isNotBlank()),
+                enabled = !isSubmitting && fullName.isNotBlank() && username.isNotBlank() && password.isNotBlank() && (role != Role.ADMIN || recoveryEmail.isNotBlank()),
                 shape = RoundedCornerShape(10.dp)
             ) {
+                if (isSubmitting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(16.dp),
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
                 Text(strings.save)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = onDismiss,
+                enabled = !isSubmitting
+            ) {
                 Text(strings.cancel)
             }
         }

@@ -80,7 +80,9 @@ object RealtimeNotificationObserver {
                             else -> true
                         }
 
+                        val createdAt = doc.getLong("createdAt") ?: System.currentTimeMillis()
                         if (shouldNotify) {
+                            BadgeManager.onNewAnnouncementReceived(createdAt)
                             SchoolNotificationManager.showAnnouncementNotification(
                                 context = context.applicationContext,
                                 title = title,
@@ -109,6 +111,15 @@ object RealtimeNotificationObserver {
             if (e != null || snapshot == null) {
                 Log.w(TAG, "Conversations index listener error: ${e?.message}")
                 return@addSnapshotListener
+            }
+
+            val hasAnyUnread = snapshot.documents.any { d ->
+                val unreadMap = (d.get("unreadMap") as? Map<*, *>) ?: emptyMap<Any, Any>()
+                val count = (unreadMap[currentUser.id] as? Number)?.toInt() ?: 0
+                count > 0
+            }
+            if (hasAnyUnread) {
+                BadgeManager.setUnreadMessages(true)
             }
 
             for (doc in snapshot.documents) {
@@ -142,6 +153,9 @@ object RealtimeNotificationObserver {
                                     if (senderId.isNotBlank() && senderId == currentUser.id) {
                                         continue
                                     }
+
+                                    // Trigger badge indicator
+                                    BadgeManager.onNewMessageReceived(convId)
 
                                     // If user is currently looking at this exact chat screen, don't buzz with heads-up
                                     if (activeConversationId == convId) {

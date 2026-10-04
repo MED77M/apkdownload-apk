@@ -14,6 +14,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.data.firebase.FirebaseManager
+import com.example.data.notification.BadgeManager
 import com.example.localization.AppLanguage
 import com.example.localization.Translations
 import com.example.ui.admin.DashboardActionRow
@@ -67,6 +68,8 @@ fun StudentDashboardScreen(
         if (myGrades.isNotEmpty()) String.format("%.1f", myGrades.map { it.score }.average()) else "0.0"
     }
 
+    val hasUnreadMessages by BadgeManager.hasUnreadMessages.collectAsState()
+    val hasUnreadAnnouncements by BadgeManager.hasUnreadAnnouncements.collectAsState()
     val scrollState = rememberScrollState()
 
     Scaffold(
@@ -76,7 +79,33 @@ fun StudentDashboardScreen(
                 subtitle = "${strings.roleStudent}: ${currentStudent?.fullName ?: ""}",
                 currentLanguage = currentLanguage,
                 onLanguageChange = onLanguageChange,
-                onLogoutClick = onLogout
+                onLogoutClick = onLogout,
+                actions = {
+                    IconButton(
+                        onClick = {
+                            BadgeManager.clearAnnouncementsBadge()
+                            onNavigateToAnnouncements()
+                        },
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        BadgedBox(
+                            badge = {
+                                if (hasUnreadAnnouncements) {
+                                    Badge(
+                                        containerColor = Color(0xFFEF4444),
+                                        modifier = Modifier.size(9.dp)
+                                    )
+                                }
+                            }
+                        ) {
+                            Icon(
+                                Icons.Default.Campaign,
+                                contentDescription = strings.announcementsTitle,
+                                tint = Color.White
+                            )
+                        }
+                    }
+                }
             )
         }
     ) { paddingValues ->
@@ -326,16 +355,24 @@ fun StudentDashboardScreen(
                         title = strings.chatTitle,
                         icon = Icons.Default.Chat,
                         color = Color(0xFF7C3AED),
-                        onClick = onNavigateToChat,
-                        testTag = "student_action_chat"
+                        onClick = {
+                            BadgeManager.clearMessagesBadge()
+                            onNavigateToChat()
+                        },
+                        testTag = "student_action_chat",
+                        hasBadge = hasUnreadMessages
                     )
                     HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
                     DashboardActionRow(
                         title = strings.announcementsTitle,
                         icon = Icons.Default.Campaign,
                         color = Color(0xFFD97706),
-                        onClick = onNavigateToAnnouncements,
-                        testTag = "student_action_announcements"
+                        onClick = {
+                            BadgeManager.clearAnnouncementsBadge()
+                            onNavigateToAnnouncements()
+                        },
+                        testTag = "student_action_announcements",
+                        hasBadge = hasUnreadAnnouncements
                     )
                 }
             }

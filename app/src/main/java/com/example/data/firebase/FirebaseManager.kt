@@ -632,29 +632,30 @@ class FirebaseManager private constructor(private val context: Context) {
         }
 
         return try {
-            val newUid = authUid ?: cleanUsername
+            val newUid = cleanUsername
             val finalUser = newUser.copy(id = newUid, username = cleanUsername, isActive = true)
 
             val userMap = finalUser.toMap().toMutableMap()
             userMap["password"] = cleanPassword
             userMap["email"] = cleanEmail
             userMap["username"] = cleanUsername
+            userMap["authUid"] = authUid ?: cleanUsername
             userMap["createdAt"] = com.google.firebase.Timestamp.now()
 
-            // 1. Write document by newUid
-            db.collection("users").document(newUid).set(userMap).await()
+            // 1. Write EXACTLY ONE document with cleanUsername as key to strictly prevent duplicate entries
+            db.collection("users").document(cleanUsername).set(userMap).await()
 
-            // 2. Also write document with username as key for direct instant lookup from any phone
-            if (newUid != cleanUsername) {
+            // 2. Clean up any stale duplicate document that might have been saved by authUid
+            if (authUid != null && authUid != cleanUsername) {
                 try {
-                    db.collection("users").document(cleanUsername).set(userMap).await()
-                } catch (e: Exception) {
-                    Log.w(TAG, "Secondary doc write note: ${e.message}")
-                }
+                    db.collection("users").document(authUid).delete().await()
+                } catch (_: Exception) {}
             }
 
-            // Update local memory flow for instant responsiveness
-            LocalDataStore.usersFlow.value = LocalDataStore.usersFlow.value.filter { it.id != newUid && it.id != cleanUsername } + finalUser
+            // Update local memory flow for instant responsiveness (deduplicating by username and id)
+            LocalDataStore.usersFlow.value = LocalDataStore.usersFlow.value.filter {
+                it.id != cleanUsername && !it.username.equals(cleanUsername, ignoreCase = true)
+            } + finalUser
 
             Result.success(finalUser)
         } catch (e: Exception) {
@@ -734,6 +735,17 @@ class FirebaseManager private constructor(private val context: Context) {
                 return Result.failure(Exception("PRIMARY_ADMIN_PROTECTED"))
             }
             db.collection("users").document(userId).delete().await()
+            val username = doc.getString("username")
+            if (!username.isNullOrBlank() && username != userId) {
+                try { db.collection("users").document(username).delete().await() } catch (_: Exception) {}
+            }
+            val authUid = doc.getString("authUid")
+            if (!authUid.isNullOrBlank() && authUid != userId) {
+                try { db.collection("users").document(authUid).delete().await() } catch (_: Exception) {}
+            }
+            LocalDataStore.usersFlow.value = LocalDataStore.usersFlow.value.filter {
+                it.id != userId && (username == null || !it.username.equals(username, ignoreCase = true))
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -937,7 +949,7 @@ class FirebaseManager private constructor(private val context: Context) {
                 }
                 val users = snapshot?.documents?.mapNotNull { doc ->
                     doc.data?.let { SchoolUser.fromMap(doc.id, it) }
-                } ?: emptyList()
+                }?.distinctBy { it.username.lowercase().trim() } ?: emptyList()
                 LocalDataStore.usersFlow.value = if (role == null) users else (LocalDataStore.usersFlow.value.filter { it.role != role } + users)
                 trySend(users)
             }

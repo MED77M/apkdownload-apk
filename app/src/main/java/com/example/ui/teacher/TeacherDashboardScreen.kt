@@ -16,6 +16,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.data.firebase.FirebaseManager
 import com.example.data.model.TimetableSlot
+import com.example.data.notification.BadgeManager
 import com.example.localization.AppLanguage
 import com.example.localization.Translations
 import com.example.ui.admin.DashboardActionRow
@@ -38,6 +39,7 @@ fun TeacherDashboardScreen(
     onNavigateToGrades: () -> Unit,
     onNavigateToChat: () -> Unit,
     onNavigateToFinance: () -> Unit = {},
+    onNavigateToAnnouncements: () -> Unit = {},
     onLogout: () -> Unit
 ) {
     val strings = Translations.get(currentLanguage)
@@ -46,6 +48,7 @@ fun TeacherDashboardScreen(
     val slots by firebaseManager.observeTimetable(teacherId = currentTeacher?.id).collectAsState(initial = emptyList())
     val resources by firebaseManager.observeResources().collectAsState(initial = emptyList())
     val homeworks by firebaseManager.observeHomework().collectAsState(initial = emptyList())
+    val hasUnreadAnnouncements by BadgeManager.hasUnreadAnnouncements.collectAsState()
 
     val canPublish = currentTeacher?.teacherPermissions?.canPublishResources ?: true
     val canEditGrades = currentTeacher?.teacherPermissions?.canEditGrades ?: true
@@ -64,6 +67,30 @@ fun TeacherDashboardScreen(
                 onLanguageChange = onLanguageChange,
                 onLogoutClick = onLogout,
                 actions = {
+                    IconButton(
+                        onClick = {
+                            BadgeManager.clearAnnouncementsBadge()
+                            onNavigateToAnnouncements()
+                        },
+                        modifier = Modifier.size(48.dp).testTag("btn_teacher_header_announcements")
+                    ) {
+                        BadgedBox(
+                            badge = {
+                                if (hasUnreadAnnouncements) {
+                                    Badge(
+                                        containerColor = Color(0xFFEF4444),
+                                        modifier = Modifier.size(9.dp)
+                                    )
+                                }
+                            }
+                        ) {
+                            Icon(
+                                Icons.Default.Campaign,
+                                contentDescription = strings.announcementsTitle,
+                                tint = Color.White
+                            )
+                        }
+                    }
                     IconButton(
                         onClick = { showSearchDialog = true },
                         modifier = Modifier.size(48.dp).testTag("btn_teacher_header_search")

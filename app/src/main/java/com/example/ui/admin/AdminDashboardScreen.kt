@@ -19,6 +19,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.data.firebase.FirebaseManager
 import com.example.data.model.Role
+import com.example.data.notification.BadgeManager
 import com.example.localization.AppLanguage
 import com.example.localization.Translations
 import com.example.ui.common.AppHeader
@@ -76,6 +77,7 @@ fun AdminDashboardScreen(
         payments.filter { it.status == "PAID" }.sumOf { it.amount }
     }
 
+    val hasUnreadAnnouncements by BadgeManager.hasUnreadAnnouncements.collectAsState()
     val scrollState = rememberScrollState()
 
     Scaffold(
@@ -87,6 +89,30 @@ fun AdminDashboardScreen(
                 onLanguageChange = onLanguageChange,
                 onLogoutClick = onLogout,
                 actions = {
+                    IconButton(
+                        onClick = {
+                            BadgeManager.clearAnnouncementsBadge()
+                            onNavigateToAnnouncements()
+                        },
+                        modifier = Modifier.size(48.dp).testTag("btn_header_announcements")
+                    ) {
+                        BadgedBox(
+                            badge = {
+                                if (hasUnreadAnnouncements) {
+                                    Badge(
+                                        containerColor = Color(0xFFEF4444),
+                                        modifier = Modifier.size(9.dp)
+                                    )
+                                }
+                            }
+                        ) {
+                            Icon(
+                                Icons.Default.Campaign,
+                                contentDescription = strings.announcementsTitle,
+                                tint = Color.White
+                            )
+                        }
+                    }
                     IconButton(
                         onClick = { showSearchDialog = true },
                         modifier = Modifier.size(48.dp).testTag("btn_header_search")
@@ -231,8 +257,12 @@ fun AdminDashboardScreen(
                         title = strings.announcementsTitle,
                         icon = Icons.Default.Campaign,
                         color = SchoolWarning,
-                        onClick = onNavigateToAnnouncements,
-                        testTag = "admin_action_announcements"
+                        onClick = {
+                            BadgeManager.clearAnnouncementsBadge()
+                            onNavigateToAnnouncements()
+                        },
+                        testTag = "admin_action_announcements",
+                        hasBadge = hasUnreadAnnouncements
                     )
                 }
             }
@@ -320,7 +350,8 @@ fun DashboardActionRow(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     color: Color,
     onClick: () -> Unit,
-    testTag: String
+    testTag: String,
+    hasBadge: Boolean = false
 ) {
     Surface(
         onClick = onClick,
@@ -358,6 +389,14 @@ fun DashboardActionRow(
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f)
             )
+            if (hasBadge) {
+                Surface(
+                    shape = androidx.compose.foundation.shape.CircleShape,
+                    color = Color(0xFFEF4444),
+                    modifier = Modifier.size(9.dp)
+                ) {}
+                Spacer(modifier = Modifier.width(8.dp))
+            }
             Icon(
                 imageVector = Icons.Default.ChevronRight,
                 contentDescription = null,
