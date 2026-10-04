@@ -24,6 +24,7 @@ import com.example.ui.common.AppHeader
 import com.example.ui.common.EmptyStateView
 import com.example.ui.theme.SchoolPrimary
 import com.example.ui.theme.SchoolSecondary
+import kotlinx.coroutines.launch
 
 @Composable
 fun StudentResourcesScreen(
@@ -34,6 +35,7 @@ fun StudentResourcesScreen(
 ) {
     val strings = Translations.get(currentLanguage)
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val currentStudent = firebaseManager.currentUser
 
     val resources by firebaseManager.observeResources(groupId = currentStudent?.groupIds?.firstOrNull()).collectAsState(initial = emptyList())
@@ -147,15 +149,24 @@ fun StudentResourcesScreen(
                                 if (res.fileUrl.isNotEmpty()) {
                                     IconButton(
                                         onClick = {
-                                            try {
-                                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(res.fileUrl))
-                                                context.startActivity(intent)
-                                            } catch (e: Exception) {
-                                                Toast.makeText(context, "Could not open file", Toast.LENGTH_SHORT).show()
+                                            scope.launch {
+                                                Toast.makeText(context, strings.downloadingFile, Toast.LENGTH_SHORT).show()
+                                                val dlRes = com.example.data.file.FileDownloadHelper.downloadAndSaveToPhone(
+                                                    context = context,
+                                                    urlOrData = res.fileUrl,
+                                                    suggestedFileName = "${res.title.ifBlank { "Resource" }}.pdf",
+                                                    mimeType = "application/pdf"
+                                                )
+                                                dlRes.onSuccess { file ->
+                                                    Toast.makeText(context, strings.fileDownloaded, Toast.LENGTH_SHORT).show()
+                                                    com.example.data.file.FileDownloadHelper.openFile(context, file, "application/pdf")
+                                                }.onFailure { err ->
+                                                    Toast.makeText(context, "${strings.downloadFailed}: ${err.message}", Toast.LENGTH_SHORT).show()
+                                                }
                                             }
                                         }
                                     ) {
-                                        Icon(Icons.Default.Download, contentDescription = "Download", tint = SchoolPrimary)
+                                        Icon(Icons.Default.Download, contentDescription = strings.downloadFile, tint = SchoolPrimary)
                                     }
                                 }
                             }

@@ -120,7 +120,8 @@ object SchoolNotificationManager {
             .setContentTitle(title)
             .setContentText(messageText)
             .setStyle(NotificationCompat.BigTextStyle().bigText(messageText))
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setAutoCancel(true)
             .setSound(soundUri)
@@ -167,7 +168,8 @@ object SchoolNotificationManager {
             .setContentTitle(notificationTitle)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(fullContent))
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
             .setCategory(NotificationCompat.CATEGORY_EVENT)
             .setAutoCancel(true)
             .setSound(soundUri)
@@ -196,12 +198,17 @@ object SchoolNotificationManager {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val builder = NotificationCompat.Builder(context, CHANNEL_GENERAL_ID)
+        val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+
+        val builder = NotificationCompat.Builder(context, CHANNEL_MESSAGES_ID)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle("🔔 science.est.center")
             .setContentText("خاصية الإشعارات مفعلة وتعمل بنجاح على هاتفك!")
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
             .setAutoCancel(true)
+            .setSound(soundUri)
+            .setVibrate(longArrayOf(0, 250, 150, 250))
             .setContentIntent(pendingIntent)
 
         try {

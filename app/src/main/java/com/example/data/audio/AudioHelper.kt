@@ -32,6 +32,8 @@ class AudioHelper(private val context: Context) {
                 setAudioSource(MediaRecorder.AudioSource.MIC)
                 setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
                 setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                setAudioEncodingBitRate(32000)
+                setAudioSamplingRate(22050)
                 setOutputFile(outputFile.absolutePath)
                 prepare()
                 start()
@@ -65,23 +67,63 @@ class AudioHelper(private val context: Context) {
 
     fun playAudio(urlOrPath: String, onComplete: () -> Unit) {
         stopPlayback()
+        if (urlOrPath.isBlank()) {
+            onComplete()
+            return
+        }
+
         try {
+            val resolvedDataSource: String = when {
+                urlOrPath.startsWith("data:") -> {
+                    // Decode base64 voice note into cache file
+                    val base64Data = urlOrPath.substringAfter("base64,")
+                    val bytes = android.util.Base64.decode(base64Data, android.util.Base64.DEFAULT)
+                    val tempAudioFile = File(context.cacheDir, "play_voice_${System.currentTimeMillis()}.m4a")
+                    tempAudioFile.writeBytes(bytes)
+                    tempAudioFile.absolutePath
+                }
+                urlOrPath.startsWith("file://") -> {
+                    android.net.Uri.parse(urlOrPath).path ?: urlOrPath.removePrefix("file://")
+                }
+                urlOrPath.startsWith("content://") -> {
+                    val tempAudioFile = File(context.cacheDir, "play_voice_${System.currentTimeMillis()}.m4a")
+                    val bytes = try {
+                        val uri = android.net.Uri.parse(urlOrPath)
+                        context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    } catch (e: Exception) {
+                        Log.w("AudioHelper", "Could not open content URI for audio: ${e.message}")
+                        null
+                    }
+                    if (bytes != null && bytes.isNotEmpty()) {
+                        tempAudioFile.writeBytes(bytes)
+                        tempAudioFile.absolutePath
+                    } else {
+                        urlOrPath
+                    }
+                }
+                else -> {
+                    urlOrPath
+                }
+            }
+
             mediaPlayer = MediaPlayer().apply {
-                setDataSource(urlOrPath)
+                setDataSource(resolvedDataSource)
                 prepareAsync()
                 setOnPreparedListener { start() }
                 setOnCompletionListener {
                     stopPlayback()
                     onComplete()
                 }
-                setOnErrorListener { _, _, _ ->
+                setOnErrorListener { _, what, extra ->
+                    Log.e("AudioHelper", "MediaPlayer error: what=$what, extra=$extra")
                     stopPlayback()
                     onComplete()
                     true
                 }
             }
-        } catch (e: IOException) {
-            Log.e("AudioHelper", "Failed to play audio", e)
+        } catch (e: Exception) {
+            Log.e("AudioHelper", "Failed to initialize playback for audio", e)
+            stopPlayback()
             onComplete()
         }
     }

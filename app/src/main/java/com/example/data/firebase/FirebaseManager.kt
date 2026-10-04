@@ -2331,6 +2331,7 @@ class FirebaseManager private constructor(private val context: Context) {
             message.messageText.isNotEmpty() -> message.messageText
             message.imageUrl.isNotEmpty() -> "📷 Photo"
             message.audioUrl.isNotEmpty() -> "🎤 Voice Note"
+            message.documentUrl.isNotEmpty() -> "📄 ${message.documentName.ifBlank { "Document" }}"
             else -> "Message"
         }
 
@@ -2422,6 +2423,10 @@ class FirebaseManager private constructor(private val context: Context) {
                         imageUrl = it.getString("imageUrl") ?: "",
                         audioUrl = it.getString("audioUrl") ?: "",
                         audioDurationSeconds = (it.getLong("audioDurationSeconds") ?: 0L).toInt(),
+                        documentUrl = it.getString("documentUrl") ?: "",
+                        documentName = it.getString("documentName") ?: "",
+                        documentSize = it.getLong("documentSize") ?: 0L,
+                        documentType = it.getString("documentType") ?: "",
                         timestamp = it.getLong("timestamp") ?: System.currentTimeMillis(),
                         readBy = (it.get("readBy") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
                     )
@@ -2561,24 +2566,81 @@ class FirebaseManager private constructor(private val context: Context) {
     }
 
     // ----------------------------------------------------
-    // STORAGE FILE UPLOAD
+    // STORAGE FILE UPLOAD (Cloud Storage with resilient inline data fallback)
     // ----------------------------------------------------
 
     suspend fun uploadFile(
         fileUri: Uri,
         storagePath: String
     ): Result<String> {
-        if (!isUsingCustomDatabase() || storage == null) {
-            return Result.success(fileUri.toString())
+        val st = storage
+        if (st != null) {
+            try {
+                val ref = st.reference.child(storagePath)
+                ref.putFile(fileUri).await()
+                val downloadUrl = ref.downloadUrl.await()
+                return Result.success(downloadUrl.toString())
+            } catch (e: Exception) {
+                Log.w(TAG, "Storage uploadFile note: ${e.message}, falling back to optimized inline data")
+            }
         }
-        val st = storage ?: return Result.success(fileUri.toString())
+
         return try {
-            val ref = st.reference.child(storagePath)
-            ref.putFile(fileUri).await()
-            val downloadUrl = ref.downloadUrl.await()
-            Result.success(downloadUrl.toString())
+            val contentResolver = context.contentResolver
+            val mimeType = contentResolver.getType(fileUri) ?: "image/jpeg"
+            val bytes = if (mimeType.startsWith("image/")) {
+                val inputStream = contentResolver.openInputStream(fileUri)
+                val originalBitmap = android.graphics.BitmapFactory.decodeStream(inputStream)
+                inputStream?.close()
+
+                if (originalBitmap != null) {
+                    val maxDimension = 1024
+                    val width = originalBitmap.width
+                    val height = originalBitmap.height
+                    val scale = if (width > maxDimension || height > maxDimension) {
+                        maxDimension.toFloat() / maxOf(width, height)
+                    } else {
+                        1.0f
+                    }
+
+                    val scaledBitmap = if (scale < 1.0f) {
+                        android.graphics.Bitmap.createScaledBitmap(
+                            originalBitmap,
+                            (width * scale).toInt(),
+                            (height * scale).toInt(),
+                            true
+                        )
+                    } else {
+                        originalBitmap
+                    }
+
+                    var quality = 75
+                    var stream = java.io.ByteArrayOutputStream()
+                    scaledBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, quality, stream)
+                    var compressedBytes = stream.toByteArray()
+                    while (compressedBytes.size > 400 * 1024 && quality > 30) {
+                        quality -= 15
+                        stream = java.io.ByteArrayOutputStream()
+                        scaledBitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, quality, stream)
+                        compressedBytes = stream.toByteArray()
+                    }
+                    compressedBytes
+                } else {
+                    contentResolver.openInputStream(fileUri)?.use { it.readBytes() } ?: ByteArray(0)
+                }
+            } else {
+                contentResolver.openInputStream(fileUri)?.use { it.readBytes() } ?: ByteArray(0)
+            }
+
+            if (bytes.isNotEmpty()) {
+                val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                Result.success("data:$mimeType;base64,$base64")
+            } else {
+                Result.failure(Exception("File is empty"))
+            }
         } catch (e: Exception) {
-            Result.success(fileUri.toString())
+            Log.e(TAG, "Failed reading file bytes: ${e.message}", e)
+            Result.failure(e)
         }
     }
 
@@ -2586,17 +2648,111 @@ class FirebaseManager private constructor(private val context: Context) {
         file: File,
         storagePath: String
     ): Result<String> {
-        if (!isUsingCustomDatabase() || storage == null) {
-            return Result.success(Uri.fromFile(file).toString())
+        val st = storage
+        if (st != null) {
+            try {
+                val ref = st.reference.child(storagePath)
+                ref.putFile(Uri.fromFile(file)).await()
+                val downloadUrl = ref.downloadUrl.await()
+                return Result.success(downloadUrl.toString())
+            } catch (e: Exception) {
+                Log.w(TAG, "Storage uploadLocalFile note: ${e.message}, falling back to inline audio")
+            }
         }
-        val st = storage ?: return Result.success(Uri.fromFile(file).toString())
+
         return try {
-            val ref = st.reference.child(storagePath)
-            ref.putFile(Uri.fromFile(file)).await()
-            val downloadUrl = ref.downloadUrl.await()
-            Result.success(downloadUrl.toString())
+            val bytes = file.readBytes()
+            if (bytes.isNotEmpty()) {
+                val mimeType = if (file.name.endsWith(".m4a", true)) "audio/m4a" else "audio/mp4"
+                val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                Result.success("data:$mimeType;base64,$base64")
+            } else {
+                Result.failure(Exception("Audio file is empty"))
+            }
         } catch (e: Exception) {
-            Result.success(Uri.fromFile(file).toString())
+            Log.e(TAG, "Failed reading audio file: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun uploadDocument(
+        fileUri: Uri,
+        fileName: String,
+        storagePath: String
+    ): Result<String> {
+        val st = storage
+        if (st != null) {
+            try {
+                val ref = st.reference.child(storagePath)
+                ref.putFile(fileUri).await()
+                val downloadUrl = ref.downloadUrl.await()
+                return Result.success(downloadUrl.toString())
+            } catch (e: Exception) {
+                Log.w(TAG, "Storage uploadDocument note: ${e.message}, falling back to inline document")
+            }
+        }
+
+        return try {
+            val contentResolver = context.contentResolver
+            val mimeType = contentResolver.getType(fileUri) ?: when {
+                fileName.endsWith(".pdf", true) -> "application/pdf"
+                fileName.endsWith(".doc", true) || fileName.endsWith(".docx", true) -> "application/msword"
+                fileName.endsWith(".txt", true) -> "text/plain"
+                else -> "application/octet-stream"
+            }
+            val bytes = contentResolver.openInputStream(fileUri)?.use { it.readBytes() } ?: ByteArray(0)
+            if (bytes.size > 850 * 1024) {
+                return Result.failure(Exception("File size (${bytes.size / 1024} KB) exceeds 850KB limit for inline sync. Please use a smaller file or ensure Firebase Storage is configured."))
+            }
+            if (bytes.isNotEmpty()) {
+                val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                Result.success("data:$mimeType;base64,$base64")
+            } else {
+                Result.failure(Exception("Document is empty"))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed reading document: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun uploadDocumentFile(
+        file: File,
+        fileName: String,
+        storagePath: String
+    ): Result<String> {
+        val st = storage
+        if (st != null) {
+            try {
+                val ref = st.reference.child(storagePath)
+                ref.putFile(Uri.fromFile(file)).await()
+                val downloadUrl = ref.downloadUrl.await()
+                return Result.success(downloadUrl.toString())
+            } catch (e: Exception) {
+                Log.w(TAG, "Storage uploadDocumentFile note: ${e.message}, falling back to inline document")
+            }
+        }
+
+        return try {
+            val bytes = file.readBytes()
+            val mimeType = when {
+                fileName.endsWith(".pdf", true) -> "application/pdf"
+                fileName.endsWith(".doc", true) || fileName.endsWith(".docx", true) -> "application/msword"
+                fileName.endsWith(".txt", true) -> "text/plain"
+                else -> "application/octet-stream"
+            }
+            if (bytes.size > 850 * 1024) {
+                return Result.failure(Exception("File size (${bytes.size / 1024} KB) exceeds 850KB limit for inline sync. Please use a smaller file or ensure Firebase Storage is configured."))
+            }
+            if (bytes.isNotEmpty()) {
+                val base64 = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                Result.success("data:$mimeType;base64,$base64")
+            } else {
+                Result.failure(Exception("Document is empty"))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed reading document file: ${e.message}", e)
+            Result.failure(e)
         }
     }
 }

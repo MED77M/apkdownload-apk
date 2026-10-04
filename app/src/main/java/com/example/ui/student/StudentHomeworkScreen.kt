@@ -125,19 +125,28 @@ fun StudentHomeworkScreen(
                                     Spacer(modifier = Modifier.height(6.dp))
                                     OutlinedButton(
                                         onClick = {
-                                            try {
-                                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(hw.attachmentUrl))
-                                                context.startActivity(intent)
-                                            } catch (e: Exception) {
-                                                Toast.makeText(context, "Could not open link", Toast.LENGTH_SHORT).show()
+                                            scope.launch {
+                                                Toast.makeText(context, strings.downloadingFile, Toast.LENGTH_SHORT).show()
+                                                val dlRes = com.example.data.file.FileDownloadHelper.downloadAndSaveToPhone(
+                                                    context = context,
+                                                    urlOrData = hw.attachmentUrl,
+                                                    suggestedFileName = "${hw.title.ifBlank { "Homework" }}.pdf",
+                                                    mimeType = "application/pdf"
+                                                )
+                                                dlRes.onSuccess { file ->
+                                                    Toast.makeText(context, strings.fileDownloaded, Toast.LENGTH_SHORT).show()
+                                                    com.example.data.file.FileDownloadHelper.openFile(context, file, "application/pdf")
+                                                }.onFailure { err ->
+                                                    Toast.makeText(context, "${strings.downloadFailed}: ${err.message}", Toast.LENGTH_SHORT).show()
+                                                }
                                             }
                                         },
                                         shape = RoundedCornerShape(8.dp),
                                         modifier = Modifier.height(36.dp)
                                     ) {
-                                        Icon(Icons.Default.Attachment, contentDescription = null, modifier = Modifier.size(16.dp))
+                                        Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(6.dp))
-                                        Text("Open Attachment", style = MaterialTheme.typography.labelMedium)
+                                        Text(strings.downloadFile, style = MaterialTheme.typography.labelMedium)
                                     }
                                 }
 

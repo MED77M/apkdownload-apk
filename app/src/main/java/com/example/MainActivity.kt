@@ -2,6 +2,7 @@ package com.example
 
 import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -20,6 +21,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import com.example.data.firebase.FirebaseInitializer
 import com.example.data.firebase.FirebaseManager
 import com.example.data.model.Role
@@ -69,9 +71,19 @@ sealed class Screen {
 }
 
 class MainActivity : ComponentActivity() {
+    private val pendingIntentState = mutableStateOf<Intent?>(null)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        pendingIntentState.value = intent
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        pendingIntentState.value = intent
 
         FirebaseInitializer.initialize(applicationContext)
         val firebaseManager = FirebaseManager.getInstance(applicationContext)
@@ -86,14 +98,38 @@ class MainActivity : ComponentActivity() {
             var currentUser by remember { mutableStateOf(firebaseManager.currentUser) }
             var currentScreen by remember { mutableStateOf<Screen>(Screen.Login) }
 
-            // Notification permission request for Android 13+
-            val notificationPermissionLauncher = rememberLauncherForActivityResult(
-                contract = ActivityResultContracts.RequestPermission()
-            ) { isGranted ->
-                if (isGranted) {
+            // Device permissions request on first launch (Microphone for voice notes + Notifications for Android 13+)
+            val requiredPermissions = remember {
+                val list = mutableListOf(Manifest.permission.RECORD_AUDIO)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    list.add(Manifest.permission.POST_NOTIFICATIONS)
+                }
+                list.toTypedArray()
+            }
+
+            val permissionsLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.RequestMultiplePermissions()
+            ) { perms ->
+                val notifGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    perms[Manifest.permission.POST_NOTIFICATIONS] == true
+                } else true
+
+                if (notifGranted) {
                     currentUser?.let { user ->
-                        SchoolNotificationManager.fetchAndSaveFcmToken(context, user)
+                        RealtimeNotificationObserver.start(context.applicationContext, user)
                     }
+                }
+            }
+
+            // Immediately ask permissions the first time the app is opened on the phone
+            LaunchedEffect(Unit) {
+                val audioGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+                val notifGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+                } else true
+
+                if (!audioGranted || !notifGranted) {
+                    permissionsLauncher.launch(requiredPermissions)
                 }
             }
 
@@ -117,16 +153,20 @@ class MainActivity : ComponentActivity() {
             }
 
             // Handle incoming notification intent routing (e.g. tapping on a notification)
-            LaunchedEffect(intent) {
-                val route = intent?.getStringExtra("route")
+            val currentIntent by pendingIntentState
+            LaunchedEffect(currentIntent) {
+                val target = currentIntent ?: return@LaunchedEffect
+                val route = target.getStringExtra("route")
                 if (route == "announcements") {
                     currentScreen = Screen.Announcements
+                    pendingIntentState.value = null
                 } else if (route == "chat") {
-                    val convId = intent?.getStringExtra("conversationId") ?: ""
-                    val title = intent?.getStringExtra("conversationTitle") ?: "محادثة"
-                    val isGroup = intent?.getBooleanExtra("isGroup", false) ?: false
+                    val convId = target.getStringExtra("conversationId") ?: ""
+                    val title = target.getStringExtra("conversationTitle") ?: "محادثة"
+                    val isGroup = target.getBooleanExtra("isGroup", false)
                     if (convId.isNotBlank()) {
                         currentScreen = Screen.ChatConversation(convId, title, isGroup)
+                        pendingIntentState.value = null
                     }
                 }
             }

@@ -566,6 +566,10 @@ data class ChatMessage(
     val imageUrl: String = "",
     val audioUrl: String = "",
     val audioDurationSeconds: Int = 0,
+    val documentUrl: String = "",
+    val documentName: String = "",
+    val documentSize: Long = 0L,
+    val documentType: String = "",
     val timestamp: Long = System.currentTimeMillis(),
     val readBy: List<String> = emptyList()
 ) {
@@ -578,6 +582,10 @@ data class ChatMessage(
         "imageUrl" to imageUrl,
         "audioUrl" to audioUrl,
         "audioDurationSeconds" to audioDurationSeconds,
+        "documentUrl" to documentUrl,
+        "documentName" to documentName,
+        "documentSize" to documentSize,
+        "documentType" to documentType,
         "timestamp" to timestamp,
         "readBy" to readBy
     )

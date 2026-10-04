@@ -1,6 +1,7 @@
 package com.example.data.notification
 
 import android.content.Context
+import android.util.Log
 import com.example.data.model.Role
 import com.example.data.model.SchoolUser
 import com.google.firebase.firestore.DocumentChange
@@ -10,20 +11,35 @@ import java.util.concurrent.ConcurrentHashMap
 
 object RealtimeNotificationObserver {
 
+    private const val TAG = "RealtimeNotifObserver"
     private var announcementListener: ListenerRegistration? = null
     private val conversationListeners = ConcurrentHashMap<String, ListenerRegistration>()
     private var conversationsIndexListener: ListenerRegistration? = null
+    private val notifiedMessageIds = ConcurrentHashMap.newKeySet<String>()
 
     private var appStartTime = System.currentTimeMillis()
     private var isStarted = false
+    private var currentUserId: String? = null
+
+    // Track which conversation is currently active on screen so we don't buzz the user while they are already viewing it
+    @Volatile
+    var activeConversationId: String? = null
 
     fun start(context: Context, currentUser: SchoolUser) {
-        if (isStarted) return
-        if (!com.example.data.firebase.FirebaseInitializer.isUsingCustomProject(context)) return
+        if (isStarted && currentUserId == currentUser.id) return
+        stop()
         isStarted = true
-        appStartTime = System.currentTimeMillis()
+        currentUserId = currentUser.id
+        appStartTime = System.currentTimeMillis() - 1000 // Small buffer
 
-        val db = FirebaseFirestore.getInstance()
+        val db = try {
+            FirebaseFirestore.getInstance()
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to get Firestore instance: ${e.message}", e)
+            null
+        } ?: return
+
+        Log.d(TAG, "Starting RealtimeNotificationObserver for user: ${currentUser.fullName} (${currentUser.role})")
 
         // 1. Observe Announcements
         observeAnnouncements(context, db, currentUser)
@@ -42,7 +58,9 @@ object RealtimeNotificationObserver {
                 for (change in snapshot.documentChanges) {
                     if (change.type == DocumentChange.Type.ADDED) {
                         val doc = change.document
-                        val title = doc.getString("title") ?: "إعلان جديد"
+                        if (!notifiedMessageIds.add(doc.id)) continue
+
+                        val title = doc.getString("title") ?: "إعلان مدرسي جديد"
                         val body = doc.getString("body") ?: ""
                         val authorName = doc.getString("authorName") ?: ""
                         val targetAudience = doc.getString("targetAudience") ?: "ALL"
@@ -81,63 +99,88 @@ object RealtimeNotificationObserver {
         conversationListeners.values.forEach { it.remove() }
         conversationListeners.clear()
 
-        conversationsIndexListener = db.collection("conversations")
-            .whereArrayContains("participantIds", currentUser.id)
-            .addSnapshotListener { snapshot, e ->
-                if (e != null || snapshot == null) return@addSnapshotListener
+        val query = if (currentUser.role == Role.ADMIN) {
+            db.collection("conversations")
+        } else {
+            db.collection("conversations").whereArrayContains("participantIds", currentUser.id)
+        }
 
-                for (doc in snapshot.documents) {
-                    val convId = doc.id
-                    val convName = doc.getString("name") ?: "محادثة"
-                    val isGroup = doc.getBoolean("isGroup") ?: false
+        conversationsIndexListener = query.addSnapshotListener { snapshot, e ->
+            if (e != null || snapshot == null) {
+                Log.w(TAG, "Conversations index listener error: ${e?.message}")
+                return@addSnapshotListener
+            }
 
-                    if (!conversationListeners.containsKey(convId)) {
-                        val msgListener = db.collection("conversations")
-                            .document(convId)
-                            .collection("messages")
-                            .whereGreaterThan("createdAt", appStartTime)
-                            .addSnapshotListener { msgSnap, msgErr ->
-                                if (msgErr != null || msgSnap == null) return@addSnapshotListener
+            for (doc in snapshot.documents) {
+                val convId = doc.id
+                val convName = doc.getString("name") ?: "محادثة"
+                val isGroup = doc.getBoolean("isGroup") ?: false
 
-                                for (change in msgSnap.documentChanges) {
-                                    if (change.type == DocumentChange.Type.ADDED) {
-                                        val mDoc = change.document
-                                        val senderId = mDoc.getString("senderId") ?: ""
-                                        val senderName = mDoc.getString("senderName") ?: convName
-                                        val text = mDoc.getString("text") ?: ""
-                                        val type = mDoc.getString("type") ?: "TEXT"
+                if (!conversationListeners.containsKey(convId)) {
+                    val msgListener = db.collection("conversations")
+                        .document(convId)
+                        .collection("messages")
+                        .whereGreaterThan("timestamp", appStartTime)
+                        .addSnapshotListener { msgSnap, msgErr ->
+                            if (msgErr != null || msgSnap == null) return@addSnapshotListener
 
-                                        if (senderId != currentUser.id) {
-                                            val displayBody = when (type) {
-                                                "VOICE" -> "🎙️ تسجيل صوتي"
-                                                "IMAGE" -> "📷 صورة"
-                                                else -> text
-                                            }
+                            for (change in msgSnap.documentChanges) {
+                                if (change.type == DocumentChange.Type.ADDED) {
+                                    val mDoc = change.document
+                                    val messageId = mDoc.id
+                                    if (!notifiedMessageIds.add(messageId)) continue
 
-                                            SchoolNotificationManager.showMessageNotification(
-                                                context = context.applicationContext,
-                                                senderName = if (isGroup) "$convName ($senderName)" else senderName,
-                                                messageText = displayBody,
-                                                conversationId = convId,
-                                                isGroup = isGroup
-                                            )
-                                        }
+                                    val senderId = mDoc.getString("senderId") ?: ""
+                                    val senderName = mDoc.getString("senderName") ?: convName
+                                    val messageText = mDoc.getString("messageText") ?: ""
+                                    val imageUrl = mDoc.getString("imageUrl") ?: ""
+                                    val audioUrl = mDoc.getString("audioUrl") ?: ""
+                                    val documentUrl = mDoc.getString("documentUrl") ?: ""
+                                    val documentName = mDoc.getString("documentName") ?: "مستند"
+
+                                    // Don't notify self
+                                    if (senderId.isNotBlank() && senderId == currentUser.id) {
+                                        continue
                                     }
+
+                                    // If user is currently looking at this exact chat screen, don't buzz with heads-up
+                                    if (activeConversationId == convId) {
+                                        continue
+                                    }
+
+                                    val displayBody = when {
+                                        imageUrl.isNotEmpty() -> "📷 صورة جديدة"
+                                        audioUrl.isNotEmpty() -> "🎙️ تسجيل صوتي"
+                                        documentUrl.isNotEmpty() -> "📄 $documentName"
+                                        else -> messageText.ifBlank { "رسالة جديدة" }
+                                    }
+
+                                    Log.d(TAG, "Showing notification for message from $senderName in $convId")
+                                    SchoolNotificationManager.showMessageNotification(
+                                        context = context.applicationContext,
+                                        senderName = if (isGroup) "$convName: $senderName" else senderName,
+                                        messageText = displayBody,
+                                        conversationId = convId,
+                                        isGroup = isGroup
+                                    )
                                 }
                             }
-                        conversationListeners[convId] = msgListener
-                    }
+                        }
+                    conversationListeners[convId] = msgListener
                 }
             }
+        }
     }
 
     fun stop() {
         isStarted = false
+        currentUserId = null
         announcementListener?.remove()
         announcementListener = null
         conversationsIndexListener?.remove()
         conversationsIndexListener = null
         conversationListeners.values.forEach { it.remove() }
         conversationListeners.clear()
+        notifiedMessageIds.clear()
     }
 }

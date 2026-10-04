@@ -186,6 +186,15 @@ interface AppStrings {
     val stopAndSend: String
     val playAudio: String
     val sendImage: String
+    val sendDocument: String
+    val downloadFile: String
+    val downloadingFile: String
+    val fileDownloaded: String
+    val openFile: String
+    val documentLabel: String
+    val voiceNoteLabel: String
+    val downloadFailed: String
+    val downloadImage: String
     val typeMessage: String
     val askQuestion: String
     val answerQuestion: String
@@ -516,6 +525,15 @@ class ArabicStrings : AppStrings {
     override val stopAndSend: String = "إيقاف وإرسال التسجيل"
     override val playAudio: String = "تشغيل الصوت"
     override val sendImage: String = "إرسال صورة"
+    override val sendDocument: String = "إرسال مستند (PDF أو ملف)"
+    override val downloadFile: String = "تنزيل الملف"
+    override val downloadingFile: String = "جارٍ التنزيل والحفظ..."
+    override val fileDownloaded: String = "تم حفظ الملف بنجاح في مجلد التنزيلات"
+    override val openFile: String = "فتح الملف"
+    override val documentLabel: String = "مستند / وثيقة"
+    override val voiceNoteLabel: String = "تسجيل صوتي"
+    override val downloadFailed: String = "فشل تنزيل الملف، يرجى إعادة المحاولة"
+    override val downloadImage: String = "حفظ الصورة في الهاتف"
     override val typeMessage: String = "اكتب رسالتك هنا..."
     override val askQuestion: String = "طرح سؤال دراسي جديد"
     override val answerQuestion: String = "كتابة إجابة"
@@ -841,6 +859,15 @@ class EnglishStrings : AppStrings {
     override val stopAndSend: String = "Stop & Send Audio"
     override val playAudio: String = "Play Audio"
     override val sendImage: String = "Send Photo"
+    override val sendDocument: String = "Send Document (PDF or File)"
+    override val downloadFile: String = "Download File"
+    override val downloadingFile: String = "Downloading & Saving..."
+    override val fileDownloaded: String = "File successfully saved to Downloads"
+    override val openFile: String = "Open File"
+    override val documentLabel: String = "Document"
+    override val voiceNoteLabel: String = "Voice Note"
+    override val downloadFailed: String = "Failed to download file, please try again"
+    override val downloadImage: String = "Save Photo to Phone"
     override val typeMessage: String = "Type a message..."
     override val askQuestion: String = "Ask a Question"
     override val answerQuestion: String = "Post Answer"
@@ -1166,6 +1193,15 @@ class FrenchStrings : AppStrings {
     override val stopAndSend: String = "Arrêter et envoyer"
     override val playAudio: String = "Écouter l'audio"
     override val sendImage: String = "Envoyer une photo"
+    override val sendDocument: String = "Envoyer un document (PDF ou fichier)"
+    override val downloadFile: String = "Télécharger le fichier"
+    override val downloadingFile: String = "Téléchargement en cours..."
+    override val fileDownloaded: String = "Fichier enregistré dans les Téléchargements"
+    override val openFile: String = "Ouvrir le fichier"
+    override val documentLabel: String = "Document"
+    override val voiceNoteLabel: String = "Message vocal"
+    override val downloadFailed: String = "Échec du téléchargement, veuillez réessayer"
+    override val downloadImage: String = "Enregistrer la photo"
     override val typeMessage: String = "Écrivez votre message..."
     override val askQuestion: String = "Poser une question"
     override val answerQuestion: String = "Répondre"

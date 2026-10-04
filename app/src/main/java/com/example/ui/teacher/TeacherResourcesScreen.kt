@@ -161,15 +161,24 @@ fun TeacherResourcesScreen(
                                     if (res.fileUrl.isNotEmpty()) {
                                         IconButton(
                                             onClick = {
-                                                try {
-                                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(res.fileUrl))
-                                                    context.startActivity(intent)
-                                                } catch (e: Exception) {
-                                                    Toast.makeText(context, "Could not open link", Toast.LENGTH_SHORT).show()
+                                                scope.launch {
+                                                    Toast.makeText(context, strings.downloadingFile, Toast.LENGTH_SHORT).show()
+                                                    val dlRes = com.example.data.file.FileDownloadHelper.downloadAndSaveToPhone(
+                                                        context = context,
+                                                        urlOrData = res.fileUrl,
+                                                        suggestedFileName = "${res.title.ifBlank { "Resource" }}.pdf",
+                                                        mimeType = "application/pdf"
+                                                    )
+                                                    dlRes.onSuccess { file ->
+                                                        Toast.makeText(context, strings.fileDownloaded, Toast.LENGTH_SHORT).show()
+                                                        com.example.data.file.FileDownloadHelper.openFile(context, file, "application/pdf")
+                                                    }.onFailure { err ->
+                                                        Toast.makeText(context, "${strings.downloadFailed}: ${err.message}", Toast.LENGTH_SHORT).show()
+                                                    }
                                                 }
                                             }
                                         ) {
-                                            Icon(Icons.Default.OpenInNew, contentDescription = "Open", tint = SchoolPrimary)
+                                            Icon(Icons.Default.Download, contentDescription = strings.downloadFile, tint = SchoolPrimary)
                                         }
                                     }
                                 }
