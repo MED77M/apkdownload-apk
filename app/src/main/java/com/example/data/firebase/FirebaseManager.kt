@@ -97,11 +97,26 @@ class FirebaseManager private constructor(private val context: Context) {
     }
 
     private fun normalizePassword(password: String): String {
-        return if (password.length < 6) "${password}__school_est" else password
+        val trimmed = password.trim()
+        return if (trimmed.length < 6) "${trimmed}__school_est" else trimmed
     }
 
     private fun normalizeEmail(username: String): String {
-        return "${username.trim().lowercase()}@school.app"
+        val clean = username.trim().lowercase()
+            .replace(Regex("[^a-z0-9_]"), "_")
+            .ifBlank { "user_${System.currentTimeMillis()}" }
+        return "${clean}_school@science.est.ma"
+    }
+
+    private suspend fun ensureAuthSession() {
+        val a = auth ?: return
+        if (a.currentUser == null) {
+            try {
+                a.signInAnonymously().await()
+            } catch (e: Exception) {
+                Log.w(TAG, "Anonymous session note: ${e.message}")
+            }
+        }
     }
 
     /**
@@ -345,13 +360,8 @@ class FirebaseManager private constructor(private val context: Context) {
         val trimmedUsername = username.trim().lowercase()
         val cleanPassword = password.trim()
 
-        if (trimmedUsername.isBlank()) {
+        if (trimmedUsername.isBlank() || cleanPassword.isBlank()) {
             return Result.failure(Exception("USER_NOT_FOUND"))
-        }
-
-        // Direct check for default administrator
-        if (trimmedUsername == "admin" && (cleanPassword == "admin" || cleanPassword.isBlank())) {
-            return resetAdminCredentials()
         }
 
         val db = firestore
@@ -359,23 +369,73 @@ class FirebaseManager private constructor(private val context: Context) {
 
         if (db != null) {
             try {
+                ensureAuthSession()
                 val email = normalizeEmail(trimmedUsername)
                 val authPassword = normalizePassword(cleanPassword)
 
-                // 1. Look up user by username in Firestore
-                var snapshot = try {
-                    db.collection("users")
-                        .whereEqualTo("username", trimmedUsername)
-                        .limit(1)
-                        .get()
-                        .await()
+                // 1. If trying to log in as admin, verify admin password from Firestore
+                if (trimmedUsername == "admin") {
+                    val adminDoc = try {
+                        val fixedDoc = db.collection("users").document("admin_fixed").get().await()
+                        if (fixedDoc != null && fixedDoc.exists()) fixedDoc else {
+                            val uDoc = db.collection("users").document("admin").get().await()
+                            if (uDoc != null && uDoc.exists()) uDoc else {
+                                val snap = db.collection("users").whereEqualTo("role", "ADMIN").limit(1).get().await()
+                                snap.documents.firstOrNull()
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Admin doc lookup note: ${e.message}")
+                        null
+                    }
+
+                    if (adminDoc != null && adminDoc.exists() && adminDoc.data != null) {
+                        val storedAdminPass = adminDoc.getString("password") ?: "admin"
+                        if (cleanPassword != storedAdminPass) {
+                            return Result.failure(Exception("INCORRECT_PASSWORD"))
+                        }
+                        val adminUser = SchoolUser.fromMap(adminDoc.id, adminDoc.data!!)
+                        currentUser = adminUser
+                        prefs.edit().putString(PREF_CACHED_USER_ID, adminUser.id).apply()
+                        return Result.success(adminUser)
+                    } else {
+                        // First-time initialization of default admin if not yet in Firestore
+                        if (cleanPassword == "admin") {
+                            return resetAdminCredentials()
+                        } else {
+                            return Result.failure(Exception("USER_NOT_FOUND"))
+                        }
+                    }
+                }
+
+                // 2. Look up teacher or student in Firestore
+                // Strategy A: Direct document lookup by username ID
+                var matchedDoc = try {
+                    val d = db.collection("users").document(trimmedUsername).get().await()
+                    if (d != null && d.exists() && d.data != null) d else null
                 } catch (e: Exception) {
                     null
                 }
 
-                // 2. Look up by email if not found by username
-                if (snapshot == null || snapshot.isEmpty) {
-                    snapshot = try {
+                // Strategy B: Query by username field
+                if (matchedDoc == null) {
+                    val snap = try {
+                        db.collection("users")
+                            .whereEqualTo("username", trimmedUsername)
+                            .limit(1)
+                            .get()
+                            .await()
+                    } catch (e: Exception) {
+                        null
+                    }
+                    if (snap != null && !snap.isEmpty) {
+                        matchedDoc = snap.documents.firstOrNull()
+                    }
+                }
+
+                // Strategy C: Query by email field
+                if (matchedDoc == null) {
+                    val snap = try {
                         db.collection("users")
                             .whereEqualTo("email", email)
                             .limit(1)
@@ -384,53 +444,103 @@ class FirebaseManager private constructor(private val context: Context) {
                     } catch (e: Exception) {
                         null
                     }
+                    if (snap != null && !snap.isEmpty) {
+                        matchedDoc = snap.documents.firstOrNull()
+                    }
                 }
 
-                if (snapshot != null && !snapshot.isEmpty) {
-                    val userDoc = snapshot.documents.first()
-                    val data = userDoc.data ?: emptyMap()
-                    val isActive = userDoc.getBoolean("isActive") ?: (data["isActive"] as? Boolean) ?: true
+                // Strategy D: Query by raw username (case-preserving)
+                if (matchedDoc == null && username.trim() != trimmedUsername) {
+                    val snap = try {
+                        db.collection("users")
+                            .whereEqualTo("username", username.trim())
+                            .limit(1)
+                            .get()
+                            .await()
+                    } catch (e: Exception) {
+                        null
+                    }
+                    if (snap != null && !snap.isEmpty) {
+                        matchedDoc = snap.documents.firstOrNull()
+                    }
+                }
+
+                // Strategy E: Query by phone
+                if (matchedDoc == null) {
+                    val snap = try {
+                        db.collection("users")
+                            .whereEqualTo("phone", username.trim())
+                            .limit(1)
+                            .get()
+                            .await()
+                    } catch (e: Exception) {
+                        null
+                    }
+                    if (snap != null && !snap.isEmpty) {
+                        matchedDoc = snap.documents.firstOrNull()
+                    }
+                }
+
+                // Strategy F: Full scan fallback
+                if (matchedDoc == null) {
+                    val allUsersSnap = try { db.collection("users").get().await() } catch (e: Exception) { null }
+                    if (allUsersSnap != null) {
+                        matchedDoc = allUsersSnap.documents.firstOrNull { doc ->
+                            val u = doc.getString("username") ?: ""
+                            val e = doc.getString("email") ?: ""
+                            val p = doc.getString("phone") ?: ""
+                            doc.id.equals(trimmedUsername, ignoreCase = true) ||
+                            u.equals(trimmedUsername, ignoreCase = true) ||
+                            e.equals(email, ignoreCase = true) ||
+                            p == username.trim()
+                        }
+                    }
+                }
+
+                if (matchedDoc != null && matchedDoc.exists() && matchedDoc.data != null) {
+                    val data = matchedDoc.data!!
+                    val isActive = matchedDoc.getBoolean("isActive") ?: (data["isActive"] as? Boolean) ?: true
                     if (!isActive) {
                         return Result.failure(Exception("ACCOUNT_DISABLED"))
                     }
 
-                    val storedPass = userDoc.getString("password") ?: (data["password"] as? String)
-                    val passMatches = when {
-                        storedPass != null && storedPass.isNotEmpty() -> storedPass == cleanPassword
-                        cleanPassword == "admin" -> true
-                        else -> {
-                            try {
-                                authInstance?.signInWithEmailAndPassword(email, authPassword)?.await() != null
-                            } catch (e: Exception) {
-                                false
-                            }
+                    val storedPass = matchedDoc.getString("password") ?: (data["password"] as? String) ?: ""
+                    var passMatches = false
+
+                    if (storedPass.isNotEmpty()) {
+                        passMatches = (storedPass == cleanPassword)
+                    } else {
+                        try {
+                            val authRes = authInstance?.signInWithEmailAndPassword(email, authPassword)?.await()
+                            passMatches = (authRes != null)
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Auth sign-in fallback note: ${e.message}")
+                            passMatches = false
                         }
                     }
 
                     if (passMatches) {
-                        val user = SchoolUser.fromMap(userDoc.id, data)
+                        val user = SchoolUser.fromMap(matchedDoc.id, data)
                         currentUser = user
                         prefs.edit().putString(PREF_CACHED_USER_ID, user.id).apply()
+                        // Ensure local memory flow contains this user
+                        LocalDataStore.usersFlow.value = LocalDataStore.usersFlow.value.filter { it.id != user.id } + user
                         return Result.success(user)
                     } else {
-                        return Result.failure(Exception("USER_NOT_FOUND"))
+                        return Result.failure(Exception("INCORRECT_PASSWORD"))
                     }
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Firestore login check notice: ${e.message}")
+                Log.e(TAG, "Firestore login error: ${e.message}", e)
+                if (e.message?.contains("PERMISSION_DENIED", ignoreCase = true) == true) {
+                    return Result.failure(Exception("PERMISSION_DENIED"))
+                }
             }
         }
 
         // Local cache lookup for users added locally or offline
         val localUser = LocalDataStore.usersFlow.value.firstOrNull {
             it.username.equals(trimmedUsername, ignoreCase = true)
-        } ?: when (trimmedUsername) {
-            "admin" -> if (cleanPassword == "admin" || cleanPassword.isEmpty()) LocalDataStore.adminUser else null
-            "mohamed" -> if (cleanPassword == "admin" || cleanPassword.isEmpty()) LocalDataStore.teacher1 else null
-            "sara" -> if (cleanPassword == "admin" || cleanPassword.isEmpty()) LocalDataStore.teacher2 else null
-            "ahmed" -> if (cleanPassword == "admin" || cleanPassword.isEmpty()) LocalDataStore.student1 else null
-            "fatima" -> if (cleanPassword == "admin" || cleanPassword.isEmpty()) LocalDataStore.student2 else null
-            else -> null
         }
 
         if (localUser != null) {
@@ -451,6 +561,7 @@ class FirebaseManager private constructor(private val context: Context) {
         val db = firestore
         if (db != null) {
             try {
+                ensureAuthSession()
                 val doc = db.collection("users").document(cachedUserId).get().await()
                 if (doc != null && doc.exists() && doc.data != null) {
                     val user = SchoolUser.fromMap(doc.id, doc.data!!)
@@ -499,6 +610,8 @@ class FirebaseManager private constructor(private val context: Context) {
             return Result.success(finalUser)
         }
 
+        ensureAuthSession()
+
         val defaultApp = try { FirebaseApp.getInstance() } catch (e: Exception) { null }
         val secondaryAppName = "AdminUserCreator_${System.currentTimeMillis()}"
         var secondaryApp: FirebaseApp? = null
@@ -519,26 +632,40 @@ class FirebaseManager private constructor(private val context: Context) {
         }
 
         return try {
-            val newUid = authUid ?: db.collection("users").document().id
+            val newUid = authUid ?: cleanUsername
             val finalUser = newUser.copy(id = newUid, username = cleanUsername, isActive = true)
 
             val userMap = finalUser.toMap().toMutableMap()
             userMap["password"] = cleanPassword
             userMap["email"] = cleanEmail
+            userMap["username"] = cleanUsername
             userMap["createdAt"] = com.google.firebase.Timestamp.now()
 
+            // 1. Write document by newUid
             db.collection("users").document(newUid).set(userMap).await()
 
+            // 2. Also write document with username as key for direct instant lookup from any phone
+            if (newUid != cleanUsername) {
+                try {
+                    db.collection("users").document(cleanUsername).set(userMap).await()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Secondary doc write note: ${e.message}")
+                }
+            }
+
             // Update local memory flow for instant responsiveness
-            LocalDataStore.usersFlow.value = LocalDataStore.usersFlow.value.filter { it.id != newUid } + finalUser
+            LocalDataStore.usersFlow.value = LocalDataStore.usersFlow.value.filter { it.id != newUid && it.id != cleanUsername } + finalUser
 
             Result.success(finalUser)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to create user $cleanUsername in Firestore", e)
-            val newUid = "user_${UUID.randomUUID().toString().take(8)}"
-            val finalUser = newUser.copy(id = newUid, username = cleanUsername, isActive = true)
-            LocalDataStore.usersFlow.value = LocalDataStore.usersFlow.value.filter { it.id != newUid } + finalUser
-            Result.success(finalUser)
+            val isPermissionDenied = e.message?.contains("PERMISSION_DENIED", ignoreCase = true) == true
+            val friendlyMsg = if (isPermissionDenied) {
+                "خطأ في صلاحيات قاعدة البيانات السحابية (PERMISSION_DENIED): يرجى تفعيل القواعد (Rules) في Firestore لتسمح بالقراءة والكتابة."
+            } else {
+                "فشل حفظ الحساب في قاعدة البيانات: ${e.localizedMessage ?: e.message}"
+            }
+            Result.failure(Exception(friendlyMsg))
         }
     }
 
@@ -668,105 +795,114 @@ class FirebaseManager private constructor(private val context: Context) {
     }
 
     suspend fun changeOwnPassword(oldPlain: String, newPlain: String): Result<Unit> {
-        if (!isUsingCustomDatabase() || auth == null) {
-            return Result.success(Unit)
-        }
-        val authInstance = auth ?: return Result.failure(Exception("Firebase not initialized"))
-        val currentFirebaseUser = authInstance.currentUser ?: return Result.failure(Exception("Not logged in"))
         val user = currentUser ?: return Result.failure(Exception("No user session"))
+        val cleanOld = oldPlain.trim()
+        val cleanNew = newPlain.trim()
 
-        return try {
-            val credential = com.google.firebase.auth.EmailAuthProvider.getCredential(
-                normalizeEmail(user.username),
-                normalizePassword(oldPlain)
-            )
-            currentFirebaseUser.reauthenticate(credential).await()
-            currentFirebaseUser.updatePassword(normalizePassword(newPlain)).await()
-            Result.success(Unit)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed changing own password", e)
-            Result.failure(e)
+        val db = firestore
+        val authInstance = auth
+
+        if (db != null) {
+            try {
+                // 1. Verify old password if available
+                val userDoc = try {
+                    val d1 = db.collection("users").document(user.id).get().await()
+                    if (d1 != null && d1.exists()) d1 else db.collection("users").document(user.username).get().await()
+                } catch (e: Exception) {
+                    null
+                }
+
+                if (userDoc != null && userDoc.exists()) {
+                    val currentStoredPass = userDoc.getString("password") ?: (if (user.role == Role.ADMIN) "admin" else "")
+                    if (currentStoredPass.isNotEmpty() && currentStoredPass != cleanOld) {
+                        return Result.failure(Exception("كلمة المرور الحالية غير صحيحة"))
+                    }
+                }
+
+                // 2. Update Firestore documents
+                val updateMap = mapOf<String, Any>(
+                    "password" to cleanNew,
+                    "updatedAt" to com.google.firebase.Timestamp.now()
+                )
+
+                try { db.collection("users").document(user.id).update(updateMap).await() } catch (_: Exception) {}
+                if (user.username.isNotEmpty() && user.username != user.id) {
+                    try { db.collection("users").document(user.username).update(updateMap).await() } catch (_: Exception) {}
+                }
+                if (user.role == Role.ADMIN) {
+                    try { db.collection("users").document("admin_fixed").update(updateMap).await() } catch (_: Exception) {}
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Firestore password update error: ${e.message}")
+            }
         }
-    }
 
-    suspend fun restoreDefaultAdmin(): Result<SchoolUser> {
-        return resetAdminCredentials()
+        // 3. Update Firebase Auth if logged in
+        if (authInstance != null && authInstance.currentUser != null) {
+            try {
+                val currentFirebaseUser = authInstance.currentUser
+                if (currentFirebaseUser != null) {
+                    val credential = com.google.firebase.auth.EmailAuthProvider.getCredential(
+                        normalizeEmail(user.username),
+                        normalizePassword(cleanOld)
+                    )
+                    try { currentFirebaseUser.reauthenticate(credential).await() } catch (_: Exception) {}
+                    currentFirebaseUser.updatePassword(normalizePassword(cleanNew)).await()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Auth password update notice: ${e.message}")
+            }
+        }
+
+        return Result.success(Unit)
     }
 
     suspend fun sendAdminPasswordResetEmail(identifier: String): Result<String> {
         val trimmed = identifier.trim()
-        if (trimmed.isEmpty() || trimmed.equals("admin", ignoreCase = true)) {
-            val resetRes = resetAdminCredentials()
-            return if (resetRes.isSuccess) {
-                Result.success("ADMIN_RESET_DEFAULT")
-            } else {
-                Result.failure(resetRes.exceptionOrNull() ?: Exception("Failed restoring admin"))
-            }
+        if (trimmed.isEmpty()) {
+            return Result.failure(Exception("يرجى إدخال اسم المستخدم"))
         }
 
-        if (!isUsingCustomDatabase() || firestore == null) {
-            val found = LocalDataStore.usersFlow.value.firstOrNull { it.username.equals(trimmed, ignoreCase = true) }
-            if (found != null && found.role != Role.ADMIN) {
-                val roleName = if (found.role == Role.TEACHER) "أستاذ" else "تلميذ"
-                return Result.failure(Exception("هذا الحساب خاص بـ ($roleName: ${found.fullName}). يمكن لمدير النظام (admin) تعديل أو إعادة تعيين كلمة المرور الخاصة بك مباشرة من لوحة التحكم."))
-            }
-            resetAdminCredentials()
-            return Result.success("ADMIN_RESET_DEFAULT")
-        }
-
-        val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
-
-        return try {
-            val userSnapshot = try {
-                db.collection("users")
-                    .whereEqualTo("username", trimmed.lowercase())
-                    .limit(1)
-                    .get()
-                    .await()
-            } catch (e: Exception) {
-                null
-            }
-
-            val foundUser = userSnapshot?.documents?.firstOrNull()?.let { doc ->
-                doc.data?.let { SchoolUser.fromMap(doc.id, it) }
-            }
-
-            if (foundUser != null && foundUser.role != Role.ADMIN) {
-                val roleName = when (foundUser.role) {
-                    Role.TEACHER -> "أستاذ"
-                    Role.STUDENT -> "تلميذ"
-                    else -> "مستخدم"
+        val db = firestore
+        if (db != null) {
+            return try {
+                val userSnapshot = try {
+                    val s1 = db.collection("users").whereEqualTo("username", trimmed.lowercase()).limit(1).get().await()
+                    if (s1 != null && !s1.isEmpty) s1 else db.collection("users").whereEqualTo("email", normalizeEmail(trimmed)).limit(1).get().await()
+                } catch (e: Exception) {
+                    null
                 }
-                return Result.failure(
-                    Exception("هذا الحساب خاص بـ ($roleName: ${foundUser.fullName}). يمكن لمدير النظام (admin) تعديل أو إعادة تعيين كلمة المرور الخاصة بك مباشرة من لوحة التحكم.")
-                )
-            }
 
-            val recoveryEmail = foundUser?.recoveryEmail?.trim() ?: ""
-            val authInstance = auth
+                val doc = userSnapshot?.documents?.firstOrNull()
+                if (doc == null || !doc.exists()) {
+                    return Result.failure(Exception("لم يتم العثور على حساب بهذا الاسم."))
+                }
 
-            if (authInstance != null && recoveryEmail.contains("@") && !recoveryEmail.endsWith("@school.app")) {
-                try {
+                val role = doc.getString("role") ?: "STUDENT"
+                val fullName = doc.getString("fullName") ?: trimmed
+                if (role != "ADMIN") {
+                    val roleName = if (role == "TEACHER") "أستاذ" else "تلميذ"
+                    return Result.failure(
+                        Exception("هذا الحساب خاص بـ ($roleName: $fullName). يرجى مراجعة إدارة المركز لتعديل أو استعادة كلمة المرور الخاصة بك.")
+                    )
+                }
+
+                val recoveryEmail = doc.getString("recoveryEmail")?.trim() ?: ""
+                val authInstance = auth
+
+                if (authInstance != null && recoveryEmail.contains("@") && !recoveryEmail.endsWith("@school.app")) {
                     authInstance.sendPasswordResetEmail(recoveryEmail).await()
                     Result.success(recoveryEmail)
-                } catch (e: Exception) {
-                    Log.w(TAG, "sendPasswordResetEmail failed, falling back to restoring admin credentials: ${e.message}")
-                    resetAdminCredentials()
-                    Result.success("ADMIN_RESET_DEFAULT")
-                }
-            } else {
-                val resetRes = resetAdminCredentials()
-                if (resetRes.isSuccess) {
-                    Result.success("ADMIN_RESET_DEFAULT")
                 } else {
-                    Result.failure(Exception("تعذر استعادة الحساب"))
+                    Result.failure(Exception("لم يتم تعيين بريد إلكتروني لاستعادة حساب المدير. يرجى تسجيل الدخول بكلمة المرور الحالية وتعيين بريد استعادة من الإعدادات."))
                 }
+            } catch (e: Exception) {
+                Log.e(TAG, "Password reset error: ${e.message}")
+                Result.failure(e)
             }
-        } catch (e: Exception) {
-            Log.w(TAG, "Password reset exception, restoring admin fallback: ${e.message}")
-            resetAdminCredentials()
-            Result.success("ADMIN_RESET_DEFAULT")
         }
+
+        return Result.failure(Exception("يرجى التواصل مع مسؤول النظام."))
     }
 
     fun observeUsers(role: Role? = null): Flow<List<SchoolUser>> {
@@ -790,12 +926,19 @@ class FirebaseManager private constructor(private val context: Context) {
 
             val listener = query.addSnapshotListener { snapshot, error ->
                 if (error != null) {
-                    Log.e(TAG, "Users listener error", error)
+                    Log.w(TAG, "Users listener error: ${error.message}")
+                    val fallback = if (role != null) {
+                        LocalDataStore.usersFlow.value.filter { it.role == role }
+                    } else {
+                        LocalDataStore.usersFlow.value
+                    }
+                    trySend(fallback)
                     return@addSnapshotListener
                 }
                 val users = snapshot?.documents?.mapNotNull { doc ->
                     doc.data?.let { SchoolUser.fromMap(doc.id, it) }
                 } ?: emptyList()
+                LocalDataStore.usersFlow.value = if (role == null) users else (LocalDataStore.usersFlow.value.filter { it.role != role } + users)
                 trySend(users)
             }
             awaitClose { listener.remove() }
@@ -848,15 +991,20 @@ class FirebaseManager private constructor(private val context: Context) {
                 close()
                 return@callbackFlow
             }
-            val listener = db.collection("groups").addSnapshotListener { snap, _ ->
-                val list = snap?.documents?.map {
+            val listener = db.collection("groups").addSnapshotListener { snap, err ->
+                if (err != null || snap == null) {
+                    trySend(LocalDataStore.groupsFlow.value)
+                    return@addSnapshotListener
+                }
+                val list = snap.documents.map {
                     SchoolGroup(
                         id = it.id,
                         name = it.getString("name") ?: "",
                         level = it.getString("level") ?: "",
                         studentIds = (it.get("studentIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList()
                     )
-                } ?: emptyList()
+                }
+                LocalDataStore.groupsFlow.value = list
                 trySend(list)
             }
             awaitClose { listener.remove() }
@@ -891,14 +1039,19 @@ class FirebaseManager private constructor(private val context: Context) {
                 close()
                 return@callbackFlow
             }
-            val listener = db.collection("subjects").addSnapshotListener { snap, _ ->
-                val list = snap?.documents?.map {
+            val listener = db.collection("subjects").addSnapshotListener { snap, err ->
+                if (err != null || snap == null) {
+                    trySend(LocalDataStore.subjectsFlow.value)
+                    return@addSnapshotListener
+                }
+                val list = snap.documents.map {
                     Subject(
                         id = it.id,
                         name = it.getString("name") ?: "",
                         code = it.getString("code") ?: ""
                     )
-                } ?: emptyList()
+                }
+                LocalDataStore.subjectsFlow.value = list
                 trySend(list)
             }
             awaitClose { listener.remove() }

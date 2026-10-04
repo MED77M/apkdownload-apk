@@ -80,7 +80,9 @@ fun LoginScreen(
                 errorMessage = when (err.message) {
                     "ACCOUNT_DISABLED" -> strings.accountDisabled
                     "USER_NOT_FOUND" -> strings.invalidCredentials
-                    else -> "${strings.loginError} (${err.localizedMessage ?: err.message})"
+                    "INCORRECT_PASSWORD" -> "كلمة المرور غير صحيحة، يرجى التأكد وإعادة المحاولة"
+                    "PERMISSION_DENIED" -> "خطأ في صلاحيات السحابة (PERMISSION_DENIED). يرجى مراجعة إعداد قواعد Firestore في لوحة Firebase."
+                    else -> err.localizedMessage ?: err.message ?: strings.invalidCredentials
                 }
             }
         }
@@ -302,63 +304,10 @@ fun LoginScreen(
                                 text = {
                                     Column(modifier = Modifier.fillMaxWidth()) {
                                         Text(
-                                            text = strings.forgotPasswordDesc,
+                                            text = "أدخل اسم المستخدم للتحقق من إمكانية استعادة الحساب:",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = SchoolTextSecondary
                                         )
-                                        Spacer(modifier = Modifier.height(12.dp))
-
-                                        // One-tap default admin recovery card
-                                        Surface(
-                                            color = SchoolPrimary.copy(alpha = 0.08f),
-                                            shape = RoundedCornerShape(12.dp),
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Row(
-                                                modifier = Modifier.padding(12.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.SpaceBetween
-                                            ) {
-                                                Column(modifier = Modifier.weight(1f)) {
-                                                    Text(
-                                                        text = "استعادة حساب المدير (admin)",
-                                                        style = MaterialTheme.typography.labelLarge,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = SchoolPrimary
-                                                    )
-                                                    Text(
-                                                        text = "admin / admin",
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        color = SchoolTextSecondary
-                                                    )
-                                                }
-                                                Button(
-                                                    onClick = {
-                                                        forgotLoading = true
-                                                        scope.launch {
-                                                            val res = firebaseManager.restoreDefaultAdmin()
-                                                            forgotLoading = false
-                                                            res.onSuccess {
-                                                                username = "admin"
-                                                                password = "admin"
-                                                                forgotIdentifier = "admin"
-                                                                forgotMessage = "تمت استعادة حساب المدير الافتراضي بنجاح!\nاسم المستخدم: admin\nكلمة المرور: admin"
-                                                                forgotIsError = false
-                                                            }.onFailure { err ->
-                                                                forgotMessage = err.message ?: strings.error
-                                                                forgotIsError = true
-                                                            }
-                                                        }
-                                                    },
-                                                    enabled = !forgotLoading,
-                                                    colors = ButtonDefaults.buttonColors(containerColor = SchoolPrimary),
-                                                    shape = RoundedCornerShape(8.dp),
-                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
-                                                ) {
-                                                    Text("استعادة فورية", style = MaterialTheme.typography.labelMedium)
-                                                }
-                                            }
-                                        }
 
                                         Spacer(modifier = Modifier.height(14.dp))
 
@@ -369,7 +318,7 @@ fun LoginScreen(
                                                 forgotMessage = null
                                             },
                                             label = { Text(strings.username) },
-                                            placeholder = { Text("admin / username") },
+                                            placeholder = { Text("اسم المستخدم") },
                                             singleLine = true,
                                             shape = RoundedCornerShape(12.dp),
                                             modifier = Modifier.fillMaxWidth().testTag("forgot_identifier_input")
@@ -382,28 +331,13 @@ fun LoginScreen(
                                                 shape = RoundedCornerShape(10.dp),
                                                 modifier = Modifier.fillMaxWidth()
                                             ) {
-                                                Column(modifier = Modifier.padding(10.dp)) {
+                                                Column(modifier = Modifier.padding(12.dp)) {
                                                     Text(
                                                         text = forgotMessage!!,
                                                         color = if (forgotIsError) SchoolAccentRed else SchoolSuccess,
                                                         style = MaterialTheme.typography.bodySmall,
                                                         fontWeight = FontWeight.Medium
                                                     )
-                                                    if (!forgotIsError && username == "admin") {
-                                                        Spacer(modifier = Modifier.height(8.dp))
-                                                        Button(
-                                                            onClick = {
-                                                                showForgotDialog = false
-                                                                username = "admin"
-                                                                password = "admin"
-                                                                performLogin()
-                                                            },
-                                                            colors = ButtonDefaults.buttonColors(containerColor = SchoolSuccess),
-                                                            modifier = Modifier.fillMaxWidth()
-                                                        ) {
-                                                            Text("تسجيل الدخول الآن كمدير", color = Color.White)
-                                                        }
-                                                    }
                                                 }
                                             }
                                         }
@@ -422,13 +356,7 @@ fun LoginScreen(
                                                 val res = firebaseManager.sendAdminPasswordResetEmail(forgotIdentifier)
                                                 forgotLoading = false
                                                 res.onSuccess { resultVal ->
-                                                    if (resultVal == "ADMIN_RESET_DEFAULT") {
-                                                        username = "admin"
-                                                        password = "admin"
-                                                        forgotMessage = "تمت استعادة حساب المدير الافتراضي بنجاح!\nاسم المستخدم: admin\nكلمة المرور: admin"
-                                                    } else {
-                                                        forgotMessage = "${strings.resetLinkSent} ($resultVal)"
-                                                    }
+                                                    forgotMessage = "${strings.resetLinkSent} ($resultVal)"
                                                     forgotIsError = false
                                                 }.onFailure { err ->
                                                     forgotMessage = err.localizedMessage ?: err.message ?: strings.error
