@@ -53,6 +53,7 @@ fun AnnouncementsScreen(
 
     var showCreateDialog by remember { mutableStateOf(false) }
     var editingAnnouncement by remember { mutableStateOf<Announcement?>(null) }
+    var deletingAnnouncement by remember { mutableStateOf<Announcement?>(null) }
 
     Scaffold(
         topBar = {
@@ -150,6 +151,20 @@ fun AnnouncementsScreen(
                                                     Icons.Default.Edit,
                                                     contentDescription = strings.editAnnouncement,
                                                     tint = SchoolPrimary,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        }
+                                        if (currentUser?.role == Role.ADMIN || (currentUser?.role == Role.TEACHER && item.authorName == currentUser.fullName)) {
+                                            Spacer(modifier = Modifier.width(2.dp))
+                                            IconButton(
+                                                onClick = { deletingAnnouncement = item },
+                                                modifier = Modifier.size(36.dp)
+                                            ) {
+                                                Icon(
+                                                    Icons.Default.DeleteOutline,
+                                                    contentDescription = strings.deleteAnnouncement,
+                                                    tint = Color(0xFFDC2626),
                                                     modifier = Modifier.size(18.dp)
                                                 )
                                             }
@@ -309,6 +324,38 @@ fun AnnouncementsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { editingAnnouncement = null }) { Text(strings.cancel) }
+            }
+        )
+    }
+
+    deletingAnnouncement?.let { ann ->
+        AlertDialog(
+            onDismissRequest = { deletingAnnouncement = null },
+            icon = { Icon(Icons.Default.Delete, contentDescription = null, tint = Color(0xFFDC2626)) },
+            title = { Text(strings.deleteAnnouncement) },
+            text = { Text(strings.deleteAnnouncementConfirm) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        scope.launch {
+                            val res = firebaseManager.deleteAnnouncement(ann.id)
+                            if (res.isSuccess) {
+                                Toast.makeText(context, strings.success, Toast.LENGTH_SHORT).show()
+                                deletingAnnouncement = null
+                            } else {
+                                Toast.makeText(context, strings.error, Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
+                ) {
+                    Text(strings.delete, color = Color.White)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deletingAnnouncement = null }) {
+                    Text(strings.cancel)
+                }
             }
         )
     }

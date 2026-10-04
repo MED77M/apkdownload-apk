@@ -1612,6 +1612,25 @@ class FirebaseManager private constructor(private val context: Context) {
         }
     }
 
+    suspend fun deleteAnnouncement(announcementId: String): Result<Unit> {
+        if (!isUsingCustomDatabase() || firestore == null) {
+            LocalDataStore.announcementsFlow.value = LocalDataStore.announcementsFlow.value.filter {
+                it.id != announcementId
+            }
+            return Result.success(Unit)
+        }
+        val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
+        return try {
+            db.collection("announcements").document(announcementId).delete().await()
+            LocalDataStore.announcementsFlow.value = LocalDataStore.announcementsFlow.value.filter {
+                it.id != announcementId
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun updateTimetableSlot(slot: TimetableSlot): Result<Unit> {
         if (!isUsingCustomDatabase() || firestore == null) {
             LocalDataStore.timetableFlow.value = LocalDataStore.timetableFlow.value.map {

@@ -1,6 +1,7 @@
 package com.example.ui.chat
 
 import android.Manifest
+import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -9,6 +10,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -25,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -37,6 +40,7 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.example.data.audio.AudioHelper
+import com.example.data.file.ChatImageHelper
 import com.example.data.file.FileDownloadHelper
 import com.example.data.firebase.FirebaseManager
 import com.example.data.model.ChatMessage
@@ -84,6 +88,14 @@ fun ChatConversationScreen(
     var uploadStatusText by remember { mutableStateOf<String?>(null) }
     var currentlyPlayingAudioUrl by remember { mutableStateOf<String?>(null) }
     var fullScreenImageUrl by remember { mutableStateOf<String?>(null) }
+
+    val downloadedImageIds = remember {
+        mutableStateMapOf<String, Boolean>().apply {
+            val prefs = context.getSharedPreferences("downloaded_chat_media", Context.MODE_PRIVATE)
+            val set = prefs.getStringSet("downloaded_message_ids", emptySet()) ?: emptySet()
+            set.forEach { id -> this[id] = true }
+        }
+    }
 
     val listState = rememberLazyListState()
 
@@ -282,6 +294,10 @@ fun ChatConversationScreen(
                         isAdmin = isAdmin,
                         strings = strings,
                         isPlaying = currentlyPlayingAudioUrl == msg.audioUrl && msg.audioUrl.isNotEmpty(),
+                        isImageDownloaded = isMe || (downloadedImageIds[msg.id] == true),
+                        onImageDownloaded = {
+                            downloadedImageIds[msg.id] = true
+                        },
                         onPlayAudio = {
                             if (currentlyPlayingAudioUrl == msg.audioUrl) {
                                 audioHelper.stopPlayback()
@@ -467,8 +483,8 @@ fun ChatConversationScreen(
                     .fillMaxSize()
                     .background(Color.Black)
             ) {
-                AsyncImage(
-                    model = imageUrl,
+                ChatImageViewer(
+                    imageUrl = imageUrl,
                     contentDescription = strings.downloadImage,
                     contentScale = ContentScale.Fit,
                     modifier = Modifier.fillMaxSize()
@@ -531,6 +547,8 @@ fun MessageBubble(
     isAdmin: Boolean,
     strings: com.example.localization.AppStrings,
     isPlaying: Boolean,
+    isImageDownloaded: Boolean,
+    onImageDownloaded: () -> Unit,
     onPlayAudio: () -> Unit,
     onImageClick: () -> Unit,
     onDeleteMessage: () -> Unit
@@ -569,46 +587,126 @@ fun MessageBubble(
         ) {
             Column(modifier = Modifier.padding(10.dp)) {
 
-                // 1. IMAGE MESSAGE
+                // 1. IMAGE MESSAGE (WhatsApp/Telegram style: appears after download)
                 if (message.imageUrl.isNotEmpty()) {
-                    Box(modifier = Modifier.fillMaxWidth()) {
-                        AsyncImage(
-                            model = message.imageUrl,
-                            contentDescription = "Photo",
-                            contentScale = ContentScale.Crop,
+                    var isDownloadingImage by remember { mutableStateOf(false) }
+
+                    if (isImageDownloaded) {
+                        // Image is downloaded (or sent by me) -> Display the full image in the chat!
+                        Box(modifier = Modifier.fillMaxWidth()) {
+                            ChatImageViewer(
+                                imageUrl = message.imageUrl,
+                                contentDescription = "Photo",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(200.dp)
+                                    .clip(RoundedCornerShape(10.dp)),
+                                onClick = onImageClick
+                            )
+
+                            // Quick full-screen view button overlay
+                            Surface(
+                                color = Color.Black.copy(alpha = 0.55f),
+                                shape = CircleShape,
+                                modifier = Modifier
+                                    .align(Alignment.BottomEnd)
+                                    .padding(6.dp)
+                                    .size(32.dp)
+                                    .clickable { onImageClick() }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.Fullscreen,
+                                        contentDescription = "Fullscreen",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        // Image received and NOT downloaded yet -> Display download card
+                        Surface(
+                            color = if (isMe) Color.White.copy(alpha = 0.15f) else Color.Black.copy(alpha = 0.08f),
+                            shape = RoundedCornerShape(12.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(190.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .clickable { onImageClick() }
-                        )
-
-                        // Download button overlay on image
-                        IconButton(
-                            onClick = {
-                                scope.launch {
-                                    Toast.makeText(context, strings.downloadingFile, Toast.LENGTH_SHORT).show()
-                                    val res = FileDownloadHelper.downloadAndSaveToPhone(
-                                        context = context,
-                                        urlOrData = message.imageUrl,
-                                        suggestedFileName = "Image_${message.id.take(6)}.jpg",
-                                        mimeType = "image/jpeg"
-                                    )
-                                    res.onSuccess {
-                                        Toast.makeText(context, strings.fileDownloaded, Toast.LENGTH_LONG).show()
-                                    }.onFailure { err ->
-                                        Toast.makeText(context, "${strings.downloadFailed}: ${err.message}", Toast.LENGTH_SHORT).show()
+                                .height(160.dp)
+                                .clickable(enabled = !isDownloadingImage) {
+                                    isDownloadingImage = true
+                                    scope.launch {
+                                        Toast.makeText(context, strings.downloadingFile, Toast.LENGTH_SHORT).show()
+                                        val res = FileDownloadHelper.downloadAndSaveToPhone(
+                                            context = context,
+                                            urlOrData = message.imageUrl,
+                                            suggestedFileName = "Photo_${message.id.take(6)}.jpg",
+                                            mimeType = "image/jpeg"
+                                        )
+                                        isDownloadingImage = false
+                                        res.onSuccess {
+                                            onImageDownloaded()
+                                            val prefs = context.getSharedPreferences("downloaded_chat_media", Context.MODE_PRIVATE)
+                                            val currentSet = (prefs.getStringSet("downloaded_message_ids", emptySet()) ?: emptySet()).toMutableSet()
+                                            currentSet.add(message.id)
+                                            prefs.edit().putStringSet("downloaded_message_ids", currentSet).apply()
+                                            Toast.makeText(context, strings.fileDownloaded, Toast.LENGTH_SHORT).show()
+                                        }.onFailure { err ->
+                                            Toast.makeText(context, "${strings.downloadFailed}: ${err.message}", Toast.LENGTH_LONG).show()
+                                        }
                                     }
                                 }
-                            },
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .padding(6.dp)
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(Color.Black.copy(alpha = 0.55f))
                         ) {
-                            Icon(Icons.Default.Download, contentDescription = strings.downloadFile, tint = Color.White, modifier = Modifier.size(18.dp))
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center,
+                                    modifier = Modifier.padding(12.dp)
+                                ) {
+                                    if (isDownloadingImage) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(40.dp),
+                                            color = SchoolPrimary,
+                                            strokeWidth = 3.dp
+                                        )
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(
+                                            text = strings.downloadingFile,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = if (isMe) Color.White else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    } else {
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = SchoolPrimary,
+                                            shadowElevation = 3.dp,
+                                            modifier = Modifier.size(50.dp)
+                                        ) {
+                                            Box(contentAlignment = Alignment.Center) {
+                                                Icon(
+                                                    Icons.Default.Download,
+                                                    contentDescription = strings.downloadFile,
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(26.dp)
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(8.dp))
+                                        Text(
+                                            text = "📷 صورة",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isMe) Color.White else MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            text = strings.tapToDownloadImage,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = if (isMe) Color.White.copy(alpha = 0.8f) else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                     Spacer(modifier = Modifier.height(4.dp))
@@ -870,6 +968,64 @@ fun MessageBubble(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun ChatImageViewer(
+    imageUrl: String,
+    contentDescription: String?,
+    modifier: Modifier = Modifier,
+    contentScale: ContentScale = ContentScale.Crop,
+    onClick: (() -> Unit)? = null
+) {
+    val context = LocalContext.current
+    val bitmap = remember(imageUrl) {
+        if (imageUrl.startsWith("data:")) {
+            ChatImageHelper.decodeBase64Bitmap(imageUrl)
+        } else null
+    }
+
+    val clickableModifier = if (onClick != null) modifier.clickable { onClick() } else modifier
+
+    when {
+        bitmap != null -> {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = contentDescription,
+                contentScale = contentScale,
+                modifier = clickableModifier
+            )
+        }
+        imageUrl.startsWith("file://") -> {
+            val path = Uri.parse(imageUrl).path ?: imageUrl.removePrefix("file://")
+            AsyncImage(
+                model = File(path),
+                contentDescription = contentDescription,
+                contentScale = contentScale,
+                modifier = clickableModifier
+            )
+        }
+        else -> {
+            val cachedFile = remember(imageUrl) {
+                ChatImageHelper.getLocalCacheFile(context, imageUrl.take(25).hashCode().toString(), imageUrl)
+            }
+            if (cachedFile != null && cachedFile.exists() && cachedFile.length() > 0L) {
+                AsyncImage(
+                    model = cachedFile,
+                    contentDescription = contentDescription,
+                    contentScale = contentScale,
+                    modifier = clickableModifier
+                )
+            } else {
+                AsyncImage(
+                    model = imageUrl,
+                    contentDescription = contentDescription,
+                    contentScale = contentScale,
+                    modifier = clickableModifier
+                )
             }
         }
     }

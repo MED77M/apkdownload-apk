@@ -174,6 +174,9 @@ interface AppStrings {
     val audienceTeachers: String
     val audienceStudents: String
     val unread: String
+    val deleteAnnouncement: String
+    val deleteAnnouncementConfirm: String
+    val tapToDownloadImage: String
 
     // Chat
     val chatTitle: String
@@ -514,6 +517,9 @@ class ArabicStrings : AppStrings {
     override val audienceTeachers: String = "الأساتذة فقط"
     override val audienceStudents: String = "الطلاب فقط"
     override val unread: String = "جديد وغير مقروء"
+    override val deleteAnnouncement: String = "حذف الإعلان"
+    override val deleteAnnouncementConfirm: String = "هل أنت متأكد من رغبتك في حذف هذا الإعلان نهائياً؟"
+    override val tapToDownloadImage: String = "اضغط للتنزيل وعرض الصورة"
 
     override val chatTitle: String = "المحادثات والتواصل"
     override val privateTab: String = "محادثات فردية"
@@ -848,6 +854,9 @@ class EnglishStrings : AppStrings {
     override val audienceTeachers: String = "Teachers Only"
     override val audienceStudents: String = "Students Only"
     override val unread: String = "Unread"
+    override val deleteAnnouncement: String = "Delete Announcement"
+    override val deleteAnnouncementConfirm: String = "Are you sure you want to permanently delete this announcement?"
+    override val tapToDownloadImage: String = "Tap to download and view photo"
 
     override val chatTitle: String = "Messages & Discussions"
     override val privateTab: String = "Direct Messages"
@@ -1182,6 +1191,9 @@ class FrenchStrings : AppStrings {
     override val audienceTeachers: String = "Enseignants uniquement"
     override val audienceStudents: String = "Élèves uniquement"
     override val unread: String = "Non lu"
+    override val deleteAnnouncement: String = "Supprimer l'annonce"
+    override val deleteAnnouncementConfirm: String = "Voulez-vous vraiment supprimer cette annonce ?"
+    override val tapToDownloadImage: String = "Appuyez pour télécharger et afficher la photo"
 
     override val chatTitle: String = "Messagerie & Échanges"
     override val privateTab: String = "Messages privés"
