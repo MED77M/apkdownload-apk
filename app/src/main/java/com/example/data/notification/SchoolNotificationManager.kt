@@ -18,7 +18,6 @@ import com.example.R
 import com.example.data.model.Role
 import com.example.data.model.SchoolUser
 import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.messaging.FirebaseMessaging
 import java.util.concurrent.atomic.AtomicInteger
 
 object SchoolNotificationManager {
@@ -31,7 +30,6 @@ object SchoolNotificationManager {
 
     fun initialize(context: Context) {
         createNotificationChannels(context)
-        fetchAndSaveFcmToken(context)
     }
 
     private fun createNotificationChannels(context: Context) {
@@ -213,23 +211,6 @@ object SchoolNotificationManager {
     }
 
     fun fetchAndSaveFcmToken(context: Context, currentUser: SchoolUser? = null) {
-        try {
-            FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
-                if (task.isSuccessful) {
-                    val token = task.result
-                    val userId = currentUser?.id ?: return@addOnCompleteListener
-                    if (token.isNotBlank() && userId.isNotBlank()) {
-                        try {
-                            FirebaseFirestore.getInstance()
-                                .collection("users")
-                                .document(userId)
-                                .update("fcmToken", token)
-                        } catch (_: Exception) {}
-                    }
-                }
-            }
-        } catch (_: Exception) {
-            // FCM optional fallback
-        }
+        // Realtime notifications are delivered locally via RealtimeNotificationObserver
     }
 }

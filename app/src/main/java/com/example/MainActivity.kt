@@ -97,32 +97,22 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // Check auto login on launch or perform clean reset to brand new
+            // Check auto login on launch
             LaunchedEffect(Unit) {
-                if (!firebaseManager.isBrandNewResetDone()) {
-                    firebaseManager.resetDatabaseToBrandNew()
-                    firebaseManager.setBrandNewResetDone()
-                    currentUser = null
-                    currentScreen = Screen.Login
+                firebaseManager.setBrandNewResetDone()
+                val autoUser = firebaseManager.checkAutoLogin()
+                if (autoUser != null) {
+                    currentUser = autoUser
+                    currentScreen = Screen.Main(0)
                 } else {
-                    val autoUser = firebaseManager.checkAutoLogin()
-                    if (autoUser != null) {
-                        currentUser = autoUser
-                        currentScreen = Screen.Main(0)
-                    }
+                    currentScreen = Screen.Login
                 }
             }
 
-            // Start Realtime Notification Observer and request permission when user is logged in
+            // Start Realtime Notification Observer when user is logged in
             LaunchedEffect(currentUser) {
                 currentUser?.let { user ->
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        if (!SchoolNotificationManager.hasNotificationPermission(context)) {
-                            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                        }
-                    }
                     RealtimeNotificationObserver.start(context.applicationContext, user)
-                    SchoolNotificationManager.fetchAndSaveFcmToken(context.applicationContext, user)
                 }
             }
 
@@ -163,6 +153,9 @@ class MainActivity : ComponentActivity() {
                                     onLoginSuccess = { user ->
                                         currentUser = user
                                         currentScreen = Screen.Main(0)
+                                    },
+                                    onOpenFirebaseSetup = {
+                                        currentScreen = Screen.FirebaseSetup
                                     }
                                 )
                             }
@@ -368,6 +361,9 @@ class MainActivity : ComponentActivity() {
                                                         firebaseManager = firebaseManager,
                                                         currentLanguage = currentLanguage,
                                                         onLanguageChange = { currentLanguage = it },
+                                                        onOpenFirebaseSetup = {
+                                                            currentScreen = Screen.FirebaseSetup
+                                                        },
                                                         onLogout = { logout() }
                                                     )
                                                 }

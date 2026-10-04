@@ -50,7 +50,7 @@ fun LoginScreen(
     val strings = Translations.get(currentLanguage)
     val scope = rememberCoroutineScope()
 
-    var username by remember { mutableStateOf(firebaseManager.getLastUsername().ifBlank { "admin" }) }
+    var username by remember { mutableStateOf(firebaseManager.getLastUsername()) }
     var password by remember { mutableStateOf("") }
     var rememberMe by remember { mutableStateOf(firebaseManager.isRememberMe()) }
     var passwordVisible by remember { mutableStateOf(false) }
@@ -60,17 +60,21 @@ fun LoginScreen(
     val scrollState = rememberScrollState()
 
     fun performLogin() {
-        if (username.isBlank() || password.isBlank()) {
+        val targetUser = username.trim()
+        val targetPass = password.trim()
+
+        if (targetUser.isBlank() || targetPass.isBlank()) {
             errorMessage = strings.invalidCredentials
             return
         }
+
         errorMessage = null
         isLoading = true
         scope.launch {
-            val result = firebaseManager.login(username, password)
+            val result = firebaseManager.login(targetUser, targetPass)
             isLoading = false
             result.onSuccess { user ->
-                firebaseManager.setRememberMe(rememberMe, username)
+                firebaseManager.setRememberMe(rememberMe, targetUser)
                 onLoginSuccess(user)
             }.onFailure { err ->
                 errorMessage = when (err.message) {
@@ -279,20 +283,85 @@ fun LoginScreen(
                             AlertDialog(
                                 onDismissRequest = { showForgotDialog = false },
                                 title = {
-                                    Text(
-                                        text = strings.forgotPasswordTitle,
-                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = SchoolDeepNavy
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Default.LockReset,
+                                            contentDescription = null,
+                                            tint = SchoolPrimary
+                                        )
+                                        Text(
+                                            text = strings.forgotPasswordTitle,
+                                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = SchoolDeepNavy
+                                        )
+                                    }
                                 },
                                 text = {
-                                    Column {
+                                    Column(modifier = Modifier.fillMaxWidth()) {
                                         Text(
                                             text = strings.forgotPasswordDesc,
                                             style = MaterialTheme.typography.bodySmall,
                                             color = SchoolTextSecondary
                                         )
+                                        Spacer(modifier = Modifier.height(12.dp))
+
+                                        // One-tap default admin recovery card
+                                        Surface(
+                                            color = SchoolPrimary.copy(alpha = 0.08f),
+                                            shape = RoundedCornerShape(12.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(12.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = "استعادة حساب المدير (admin)",
+                                                        style = MaterialTheme.typography.labelLarge,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = SchoolPrimary
+                                                    )
+                                                    Text(
+                                                        text = "admin / admin",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = SchoolTextSecondary
+                                                    )
+                                                }
+                                                Button(
+                                                    onClick = {
+                                                        forgotLoading = true
+                                                        scope.launch {
+                                                            val res = firebaseManager.restoreDefaultAdmin()
+                                                            forgotLoading = false
+                                                            res.onSuccess {
+                                                                username = "admin"
+                                                                password = "admin"
+                                                                forgotIdentifier = "admin"
+                                                                forgotMessage = "تمت استعادة حساب المدير الافتراضي بنجاح!\nاسم المستخدم: admin\nكلمة المرور: admin"
+                                                                forgotIsError = false
+                                                            }.onFailure { err ->
+                                                                forgotMessage = err.message ?: strings.error
+                                                                forgotIsError = true
+                                                            }
+                                                        }
+                                                    },
+                                                    enabled = !forgotLoading,
+                                                    colors = ButtonDefaults.buttonColors(containerColor = SchoolPrimary),
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                                                ) {
+                                                    Text("استعادة فورية", style = MaterialTheme.typography.labelMedium)
+                                                }
+                                            }
+                                        }
+
                                         Spacer(modifier = Modifier.height(14.dp))
+
                                         OutlinedTextField(
                                             value = forgotIdentifier,
                                             onValueChange = {
@@ -300,20 +369,43 @@ fun LoginScreen(
                                                 forgotMessage = null
                                             },
                                             label = { Text(strings.username) },
-                                            placeholder = { Text("admin / recovery email") },
+                                            placeholder = { Text("admin / username") },
                                             singleLine = true,
                                             shape = RoundedCornerShape(12.dp),
                                             modifier = Modifier.fillMaxWidth().testTag("forgot_identifier_input")
                                         )
 
                                         if (forgotMessage != null) {
-                                            Spacer(modifier = Modifier.height(10.dp))
-                                            Text(
-                                                text = forgotMessage!!,
-                                                color = if (forgotIsError) SchoolAccentRed else SchoolSuccess,
-                                                style = MaterialTheme.typography.bodySmall,
-                                                fontWeight = FontWeight.Medium
-                                            )
+                                            Spacer(modifier = Modifier.height(12.dp))
+                                            Surface(
+                                                color = if (forgotIsError) SchoolAccentRed.copy(alpha = 0.1f) else SchoolSuccess.copy(alpha = 0.1f),
+                                                shape = RoundedCornerShape(10.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Column(modifier = Modifier.padding(10.dp)) {
+                                                    Text(
+                                                        text = forgotMessage!!,
+                                                        color = if (forgotIsError) SchoolAccentRed else SchoolSuccess,
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        fontWeight = FontWeight.Medium
+                                                    )
+                                                    if (!forgotIsError && username == "admin") {
+                                                        Spacer(modifier = Modifier.height(8.dp))
+                                                        Button(
+                                                            onClick = {
+                                                                showForgotDialog = false
+                                                                username = "admin"
+                                                                password = "admin"
+                                                                performLogin()
+                                                            },
+                                                            colors = ButtonDefaults.buttonColors(containerColor = SchoolSuccess),
+                                                            modifier = Modifier.fillMaxWidth()
+                                                        ) {
+                                                            Text("تسجيل الدخول الآن كمدير", color = Color.White)
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 },
@@ -329,8 +421,14 @@ fun LoginScreen(
                                             scope.launch {
                                                 val res = firebaseManager.sendAdminPasswordResetEmail(forgotIdentifier)
                                                 forgotLoading = false
-                                                res.onSuccess {
-                                                    forgotMessage = strings.resetLinkSent
+                                                res.onSuccess { resultVal ->
+                                                    if (resultVal == "ADMIN_RESET_DEFAULT") {
+                                                        username = "admin"
+                                                        password = "admin"
+                                                        forgotMessage = "تمت استعادة حساب المدير الافتراضي بنجاح!\nاسم المستخدم: admin\nكلمة المرور: admin"
+                                                    } else {
+                                                        forgotMessage = "${strings.resetLinkSent} ($resultVal)"
+                                                    }
                                                     forgotIsError = false
                                                 }.onFailure { err ->
                                                     forgotMessage = err.localizedMessage ?: err.message ?: strings.error

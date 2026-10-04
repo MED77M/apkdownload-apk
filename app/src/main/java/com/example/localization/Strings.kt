@@ -317,6 +317,28 @@ interface AppStrings {
     val factoryResetConfirmMessage: String
     val factoryResetSuccess: String
     val currencySymbol: String
+    val connectNewDatabaseTitle: String
+    val connectNewDatabaseDesc: String
+    val pasteJsonTab: String
+    val manualEntryTab: String
+    val pasteJsonPlaceholder: String
+    val applyAndConnectButton: String
+    val databaseConnectedSuccess: String
+    val resetToDefaultDatabase: String
+    val searchUsersTitle: String
+    val searchUsersPlaceholder: String
+    val allUsersTab: String
+    val roomCapacity: String
+    val roomType: String
+    val roomTypeGeneral: String
+    val roomTypeLab: String
+    val roomTypeComputer: String
+    val roomTypeHall: String
+    val editRoom: String
+    val deleteRoomConfirm: String
+    val noRoomsYet: String
+    val quickTimeSlots: String
+    val sessionDetails: String
 
 }
 
@@ -621,6 +643,28 @@ class ArabicStrings : AppStrings {
     override val factoryResetConfirmMessage: String = "تحذير: سيتم حذف جميع حسابات الطلاب والأساتذة والجداول والواجبات وكافة السجلات نهائياً، والبدء كنسخة جديدة تماماً بحساب admin / admin."
     override val factoryResetSuccess: String = "تم تصفير التطبيق بنجاح والبدء كنسخة جديدة!"
     override val currencySymbol: String = "درهم"
+    override val connectNewDatabaseTitle: String = "ربط قاعدة بيانات Firebase جديدة"
+    override val connectNewDatabaseDesc: String = "استبدال قاعدة البيانات الحالية بقاعدة بياناتك الخاصة والبدء من جديد"
+    override val pasteJsonTab: String = "لصق google-services.json"
+    override val manualEntryTab: String = "إدخال يدوي"
+    override val pasteJsonPlaceholder: String = "الصق محتوى ملف google-services.json هنا..."
+    override val applyAndConnectButton: String = "حفظ والاتصال بقاعدة البيانات الجديدة"
+    override val databaseConnectedSuccess: String = "تم الاتصال بقاعدة البيانات الجديدة بنجاح!"
+    override val resetToDefaultDatabase: String = "العودة لقاعدة البيانات الأصلية"
+    override val searchUsersTitle: String = "البحث عن تلميذ أو أستاذ"
+    override val searchUsersPlaceholder: String = "ابحث بالاسم، اللقب، اسم المستخدم، أو رقم الهاتف..."
+    override val allUsersTab: String = "الكل"
+    override val roomCapacity: String = "السعة الاستيعابية"
+    override val roomType: String = "نوع القاعة وتجهيزاتها"
+    override val roomTypeGeneral: String = "قاعة تدريس عادية"
+    override val roomTypeLab: String = "مختبر علوم وفيزياء"
+    override val roomTypeComputer: String = "قاعة إعلام آلي"
+    override val roomTypeHall: String = "مدرج محاضرات"
+    override val editRoom: String = "تعديل بيانات القاعة"
+    override val deleteRoomConfirm: String = "هل أنت متأكد من حذف هذه القاعة؟"
+    override val noRoomsYet: String = "لا توجد قاعات مضافة بعد. أضف قاعة لتنظيم الجداول والحصص."
+    override val quickTimeSlots: String = "توقيتات سريعة شائعة"
+    override val sessionDetails: String = "تفاصيل الحصة"
 }
 
 class EnglishStrings : AppStrings {
@@ -924,6 +968,28 @@ class EnglishStrings : AppStrings {
     override val factoryResetConfirmMessage: String = "Warning: All student, teacher, timetable, grade, homework, and chat data will be permanently wiped, keeping only the clean default admin / admin."
     override val factoryResetSuccess: String = "Application reset successfully! You can now log in as admin / admin."
     override val currencySymbol: String = "MAD"
+    override val connectNewDatabaseTitle: String = "Connect New Firebase Database"
+    override val connectNewDatabaseDesc: String = "Replace current database with your own Firebase project and start fresh"
+    override val pasteJsonTab: String = "Paste google-services.json"
+    override val manualEntryTab: String = "Manual Entry"
+    override val pasteJsonPlaceholder: String = "Paste google-services.json content here..."
+    override val applyAndConnectButton: String = "Save & Connect to New Database"
+    override val databaseConnectedSuccess: String = "Successfully connected to new Firebase database!"
+    override val resetToDefaultDatabase: String = "Reset to Default Database"
+    override val searchUsersTitle: String = "Search Student or Teacher"
+    override val searchUsersPlaceholder: String = "Search by name, username, or phone..."
+    override val allUsersTab: String = "All"
+    override val roomCapacity: String = "Capacity"
+    override val roomType: String = "Room Type & Equipment"
+    override val roomTypeGeneral: String = "Standard Classroom"
+    override val roomTypeLab: String = "Science Lab"
+    override val roomTypeComputer: String = "Computer Lab"
+    override val roomTypeHall: String = "Lecture Hall"
+    override val editRoom: String = "Edit Room"
+    override val deleteRoomConfirm: String = "Are you sure you want to delete this room?"
+    override val noRoomsYet: String = "No rooms added yet. Add rooms to organize classes and schedule."
+    override val quickTimeSlots: String = "Common Quick Time Slots"
+    override val sessionDetails: String = "Session Details"
 }
 
 class FrenchStrings : AppStrings {
@@ -1227,6 +1293,28 @@ class FrenchStrings : AppStrings {
     override val factoryResetConfirmMessage: String = "Attention : toutes les données des élèves, enseignants, horaires, notes, devoirs et messages seront définitivement supprimées, ne laissant que le compte admin / admin."
     override val factoryResetSuccess: String = "Application réinitialisée avec succès ! Vous pouvez maintenant vous connecter en tant que admin / admin."
     override val currencySymbol: String = "DH"
+    override val connectNewDatabaseTitle: String = "Connecter une nouvelle base Firebase"
+    override val connectNewDatabaseDesc: String = "Remplacer la base actuelle par votre propre projet Firebase et repartir à zéro"
+    override val pasteJsonTab: String = "Coller google-services.json"
+    override val manualEntryTab: String = "Saisie manuelle"
+    override val pasteJsonPlaceholder: String = "Collez le contenu de google-services.json ici..."
+    override val applyAndConnectButton: String = "Enregistrer et connecter la nouvelle base"
+    override val databaseConnectedSuccess: String = "Connexion à la nouvelle base Firebase réussie !"
+    override val resetToDefaultDatabase: String = "Revenir à la base par défaut"
+    override val searchUsersTitle: String = "Rechercher un élève ou enseignant"
+    override val searchUsersPlaceholder: String = "Rechercher par nom, identifiant ou téléphone..."
+    override val allUsersTab: String = "Tous"
+    override val roomCapacity: String = "Capacité"
+    override val roomType: String = "Type de salle et équipements"
+    override val roomTypeGeneral: String = "Salle de classe standard"
+    override val roomTypeLab: String = "Laboratoire de sciences"
+    override val roomTypeComputer: String = "Salle informatique"
+    override val roomTypeHall: String = "Amphithéâtre"
+    override val editRoom: String = "Modifier la salle"
+    override val deleteRoomConfirm: String = "Voulez-vous vraiment supprimer cette salle ?"
+    override val noRoomsYet: String = "Aucune salle ajoutée pour l'instant. Ajoutez des salles pour organiser l'emploi du temps."
+    override val quickTimeSlots: String = "Créneaux horaires rapides"
+    override val sessionDetails: String = "Détails de la séance"
 }
 
 object Translations {

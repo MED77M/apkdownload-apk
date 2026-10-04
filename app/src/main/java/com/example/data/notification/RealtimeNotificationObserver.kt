@@ -19,6 +19,7 @@ object RealtimeNotificationObserver {
 
     fun start(context: Context, currentUser: SchoolUser) {
         if (isStarted) return
+        if (!com.example.data.firebase.FirebaseInitializer.isUsingCustomProject(context)) return
         isStarted = true
         appStartTime = System.currentTimeMillis()
 

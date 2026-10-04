@@ -19,6 +19,7 @@ import com.example.data.model.TimetableSlot
 import com.example.localization.AppLanguage
 import com.example.localization.Translations
 import com.example.ui.admin.DashboardActionRow
+import com.example.ui.admin.UserSearchDialog
 import com.example.ui.common.AppHeader
 import com.example.ui.common.EmptyStateView
 import com.example.ui.common.StatCard
@@ -52,6 +53,7 @@ fun TeacherDashboardScreen(
     val canViewFinance = currentTeacher?.teacherPermissions?.canViewFinance ?: false
 
     val scrollState = rememberScrollState()
+    var showSearchDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -60,7 +62,19 @@ fun TeacherDashboardScreen(
                 subtitle = "${strings.roleTeacher}: ${currentTeacher?.fullName ?: ""}",
                 currentLanguage = currentLanguage,
                 onLanguageChange = onLanguageChange,
-                onLogoutClick = onLogout
+                onLogoutClick = onLogout,
+                actions = {
+                    IconButton(
+                        onClick = { showSearchDialog = true },
+                        modifier = Modifier.size(48.dp).testTag("btn_teacher_header_search")
+                    ) {
+                        Icon(
+                            Icons.Default.PersonSearch,
+                            contentDescription = strings.searchUsersTitle,
+                            tint = Color.White
+                        )
+                    }
+                }
             )
         }
     ) { paddingValues ->
@@ -217,5 +231,13 @@ fun TeacherDashboardScreen(
                 }
             }
         }
+    }
+
+    if (showSearchDialog) {
+        UserSearchDialog(
+            firebaseManager = firebaseManager,
+            strings = strings,
+            onDismiss = { showSearchDialog = false }
+        )
     }
 }

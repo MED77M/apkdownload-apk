@@ -1,12 +1,16 @@
 package com.example.ui.admin
 
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -14,17 +18,25 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.example.data.firebase.FirebaseManager
 import com.example.data.model.*
 import com.example.localization.AppLanguage
+import com.example.localization.AppStrings
 import com.example.localization.Translations
 import com.example.ui.common.AppHeader
 import com.example.ui.common.EmptyStateView
+import com.example.ui.common.StatusBadge
+import com.example.ui.theme.SchoolAccentRed
 import com.example.ui.theme.SchoolPrimary
 import com.example.ui.theme.SchoolSecondary
 import kotlinx.coroutines.launch
@@ -41,6 +53,8 @@ fun AdminTimetableScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
+    // 0: Timetable Sessions, 1: Rooms & Facilities
+    var activeMainTab by remember { mutableStateOf(0) }
     var selectedDay by remember { mutableStateOf(1) } // 1: Mon .. 7: Sun
 
     val slots by firebaseManager.observeTimetable().collectAsState(initial = emptyList())
@@ -55,9 +69,12 @@ fun AdminTimetableScreen(
 
     var showAddSlotDialog by remember { mutableStateOf(false) }
     var editingSlot by remember { mutableStateOf<TimetableSlot?>(null) }
+    var showAddRoomDialog by remember { mutableStateOf(false) }
+    var editingRoom by remember { mutableStateOf<Room?>(null) }
+    var roomToDelete by remember { mutableStateOf<Room?>(null) }
     var showAddGroupDialog by remember { mutableStateOf(false) }
     var showAddSubjectDialog by remember { mutableStateOf(false) }
-    var showAddRoomDialog by remember { mutableStateOf(false) }
+    var showSearchDialog by remember { mutableStateOf(false) }
 
     val daysOfWeek = listOf(
         1 to strings.monday,
@@ -73,7 +90,7 @@ fun AdminTimetableScreen(
         topBar = {
             AppHeader(
                 title = strings.timetableTitle,
-                subtitle = strings.weeklySchedule,
+                subtitle = if (activeMainTab == 0) strings.weeklySchedule else strings.roomsTitle,
                 currentLanguage = currentLanguage,
                 onLanguageChange = onLanguageChange,
                 navigationIcon = {
@@ -85,23 +102,46 @@ fun AdminTimetableScreen(
                     }
                 },
                 actions = {
+                    // Search icon for finding any student or teacher
+                    IconButton(
+                        onClick = { showSearchDialog = true },
+                        modifier = Modifier.size(48.dp).testTag("btn_timetable_search_users")
+                    ) {
+                        Icon(Icons.Default.PersonSearch, contentDescription = strings.searchUsersTitle, tint = Color.White)
+                    }
                     IconButton(
                         onClick = { showAddGroupDialog = true },
                         modifier = Modifier.size(48.dp)
                     ) {
-                        Icon(Icons.Default.AddHomeWork, contentDescription = strings.addGroup, tint = Color.White)
+                        Icon(Icons.Default.Class, contentDescription = strings.addGroup, tint = Color.White)
+                    }
+                    IconButton(
+                        onClick = { showAddSubjectDialog = true },
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Icon(Icons.Default.Book, contentDescription = strings.addSubject, tint = Color.White)
                     }
                 }
             )
         },
         floatingActionButton = {
             ExtendedFloatingActionButton(
-                onClick = { showAddSlotDialog = true },
+                onClick = {
+                    if (activeMainTab == 0) showAddSlotDialog = true
+                    else showAddRoomDialog = true
+                },
                 containerColor = SchoolPrimary,
                 contentColor = Color.White,
-                icon = { Icon(Icons.Default.Add, contentDescription = null) },
-                text = { Text(strings.addSlot) },
-                modifier = Modifier.testTag("fab_add_slot")
+                icon = {
+                    Icon(
+                        imageVector = if (activeMainTab == 0) Icons.Default.AddAlarm else Icons.Default.AddBusiness,
+                        contentDescription = null
+                    )
+                },
+                text = {
+                    Text(if (activeMainTab == 0) strings.addSlot else strings.addRoom)
+                },
+                modifier = Modifier.testTag(if (activeMainTab == 0) "fab_add_slot" else "fab_add_room")
             )
         }
     ) { paddingValues ->
@@ -110,77 +150,253 @@ fun AdminTimetableScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // Quick management chip row
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                AssistChip(
-                    onClick = { showAddGroupDialog = true },
-                    label = { Text("${strings.groupsTitle} (${groups.size})") },
-                    leadingIcon = { Icon(Icons.Default.Class, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                )
-                AssistChip(
-                    onClick = { showAddSubjectDialog = true },
-                    label = { Text("${strings.subjectsTitle} (${subjects.size})") },
-                    leadingIcon = { Icon(Icons.Default.Book, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                )
-                AssistChip(
-                    onClick = { showAddRoomDialog = true },
-                    label = { Text("${strings.roomsTitle} (${rooms.size})") },
-                    leadingIcon = { Icon(Icons.Default.MeetingRoom, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                )
-            }
-
-            // Day Selector Tabs
-            ScrollableTabRow(
-                selectedTabIndex = selectedDay - 1,
+            // Main Section Tabs: [جدول الحصص] | [إدارة القاعات]
+            PrimaryTabRow(
+                selectedTabIndex = activeMainTab,
                 containerColor = MaterialTheme.colorScheme.surface,
                 contentColor = SchoolPrimary,
-                edgePadding = 16.dp
+                modifier = Modifier.fillMaxWidth()
             ) {
-                daysOfWeek.forEach { (dayNum, dayName) ->
-                    Tab(
-                        selected = selectedDay == dayNum,
-                        onClick = { selectedDay = dayNum },
-                        text = { Text(dayName, fontWeight = FontWeight.Bold) },
-                        modifier = Modifier.heightIn(min = 48.dp)
-                    )
-                }
+                Tab(
+                    selected = activeMainTab == 0,
+                    onClick = { activeMainTab = 0 },
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.CalendarMonth, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "${strings.navTimetable} (${slots.size})",
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    },
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("tab_timetable")
+                )
+                Tab(
+                    selected = activeMainTab == 1,
+                    onClick = { activeMainTab = 1 },
+                    text = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.MeetingRoom, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "${strings.roomsTitle} (${rooms.size})",
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    },
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("tab_rooms")
+                )
             }
 
-            // Slots list for selected day
-            if (daySlots.isEmpty()) {
-                EmptyStateView(
-                    message = strings.noScheduleToday,
-                    icon = Icons.Default.CalendarToday,
-                    actionText = strings.addSlot,
-                    onActionClick = { showAddSlotDialog = true }
-                )
-            } else {
-                LazyColumn(
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+            if (activeMainTab == 0) {
+                // ==========================================
+                // VIEW 1: WEEKLY TIMETABLE SESSIONS
+                // ==========================================
+
+                // Day Selector Tabs with session count badge
+                ScrollableTabRow(
+                    selectedTabIndex = selectedDay - 1,
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                    contentColor = SchoolPrimary,
+                    edgePadding = 12.dp
                 ) {
-                    items(daySlots, key = { it.id }) { slot ->
-                        TimetableSlotCard(
-                            slot = slot,
-                            onEdit = { editingSlot = slot },
-                            onDelete = {
-                                scope.launch {
-                                    firebaseManager.deleteTimetableSlot(slot.id)
+                    daysOfWeek.forEach { (dayNum, dayName) ->
+                        val count = slots.count { it.dayOfWeek == dayNum }
+                        Tab(
+                            selected = selectedDay == dayNum,
+                            onClick = { selectedDay = dayNum },
+                            text = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(dayName, fontWeight = if (selectedDay == dayNum) FontWeight.Bold else FontWeight.Normal)
+                                    if (count > 0) {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Surface(
+                                            color = if (selectedDay == dayNum) SchoolPrimary else Color.Gray.copy(alpha = 0.3f),
+                                            contentColor = if (selectedDay == dayNum) Color.White else MaterialTheme.colorScheme.onSurface,
+                                            shape = CircleShape
+                                        ) {
+                                            Text(
+                                                text = count.toString(),
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
                                 }
-                            }
+                            },
+                            modifier = Modifier.heightIn(min = 48.dp)
                         )
+                    }
+                }
+
+                // Slots list for selected day
+                if (daySlots.isEmpty()) {
+                    EmptyStateView(
+                        message = strings.noScheduleToday,
+                        icon = Icons.Default.CalendarToday,
+                        actionText = strings.addSlot,
+                        onActionClick = { showAddSlotDialog = true }
+                    )
+                } else {
+                    LazyColumn(
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.fillMaxSize()
+                    ) {
+                        items(daySlots, key = { it.id }) { slot ->
+                            TimetableSlotCard(
+                                slot = slot,
+                                onEdit = { editingSlot = slot },
+                                onDelete = {
+                                    scope.launch {
+                                        firebaseManager.deleteTimetableSlot(slot.id)
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+            } else {
+                // ==========================================
+                // VIEW 2: ROOMS & FACILITIES MANAGEMENT
+                // ==========================================
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp)
+                ) {
+                    // Header Card with Stats and Add Room button
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column {
+                                Text(
+                                    text = strings.roomsTitle,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = SchoolPrimary
+                                )
+                                Text(
+                                    text = "إجمالي: ${rooms.size} قاعات • الطاقة: ${rooms.sumOf { it.capacity }} طالب",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+
+                            Button(
+                                onClick = { showAddRoomDialog = true },
+                                shape = RoundedCornerShape(10.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = SchoolPrimary),
+                                modifier = Modifier.testTag("btn_add_room_header")
+                            ) {
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(strings.addRoom, style = MaterialTheme.typography.labelMedium)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    if (rooms.isEmpty()) {
+                        EmptyStateView(
+                            message = strings.noRoomsYet,
+                            icon = Icons.Default.MeetingRoom,
+                            actionText = strings.addRoom,
+                            onActionClick = { showAddRoomDialog = true }
+                        )
+                    } else {
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            items(rooms, key = { it.id }) { room ->
+                                val roomSlotsCount = slots.count {
+                                    it.roomId == room.id || it.roomName.equals(room.name, ignoreCase = true)
+                                }
+                                RoomCardItem(
+                                    room = room,
+                                    scheduledCount = roomSlotsCount,
+                                    strings = strings,
+                                    onEdit = { editingRoom = room },
+                                    onDelete = { roomToDelete = room }
+                                )
+                            }
+                        }
                     }
                 }
             }
         }
     }
 
-    // Add Timetable Slot Dialog with Conflict Detection
+    // ----------------------------------------------------
+    // DIALOGS: ADD / EDIT ROOM (مرتب وواضح)
+    // ----------------------------------------------------
+    if (showAddRoomDialog || editingRoom != null) {
+        val targetRoom = editingRoom
+        RoomFormDialog(
+            initialRoom = targetRoom,
+            strings = strings,
+            onDismiss = {
+                showAddRoomDialog = false
+                editingRoom = null
+            },
+            onSave = { name, capacity ->
+                scope.launch {
+                    if (targetRoom != null) {
+                        firebaseManager.updateRoom(targetRoom.copy(name = name, capacity = capacity))
+                    } else {
+                        firebaseManager.addRoom(Room(name = name, capacity = capacity))
+                    }
+                    showAddRoomDialog = false
+                    editingRoom = null
+                }
+            }
+        )
+    }
+
+    // Delete Room Confirmation Dialog
+    if (roomToDelete != null) {
+        AlertDialog(
+            onDismissRequest = { roomToDelete = null },
+            icon = { Icon(Icons.Default.Warning, contentDescription = null, tint = SchoolAccentRed) },
+            title = { Text(strings.deleteRoomConfirm, fontWeight = FontWeight.Bold) },
+            text = { Text("سيتم حذف القاعة: ${roomToDelete!!.name} (${roomToDelete!!.capacity} مقعد)") },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val rid = roomToDelete!!.id
+                        roomToDelete = null
+                        scope.launch {
+                            firebaseManager.deleteRoom(rid)
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = SchoolAccentRed)
+                ) {
+                    Text(strings.confirm)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { roomToDelete = null }) { Text(strings.cancel) }
+            }
+        )
+    }
+
+    // ----------------------------------------------------
+    // DIALOGS: ADD / EDIT TIMETABLE SLOT (مرتب وواضح جداً)
+    // ----------------------------------------------------
     if (showAddSlotDialog) {
         CreateSlotDialog(
             strings = strings,
@@ -204,7 +420,26 @@ fun AdminTimetableScreen(
         )
     }
 
-    // Dialogs to add Group, Subject, Room
+    editingSlot?.let { slot ->
+        EditSlotDialog(
+            slot = slot,
+            strings = strings,
+            onDismiss = { editingSlot = null },
+            onSave = { updatedSlot ->
+                scope.launch {
+                    val res = firebaseManager.updateTimetableSlot(updatedSlot)
+                    if (res.isSuccess) {
+                        Toast.makeText(context, strings.save, Toast.LENGTH_SHORT).show()
+                        editingSlot = null
+                    } else {
+                        Toast.makeText(context, strings.error, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        )
+    }
+
+    // Dialogs to add Group, Subject
     if (showAddGroupDialog) {
         var groupName by remember { mutableStateOf("") }
         var level by remember { mutableStateOf("") }
@@ -289,161 +524,25 @@ fun AdminTimetableScreen(
         )
     }
 
-    if (showAddRoomDialog) {
-        var roomName by remember { mutableStateOf("") }
-        var capacity by remember { mutableStateOf("30") }
-        AlertDialog(
-            onDismissRequest = { showAddRoomDialog = false },
-            title = { Text(strings.addRoom) },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = roomName,
-                        onValueChange = { roomName = it },
-                        label = { Text(strings.roomName) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    OutlinedTextField(
-                        value = capacity,
-                        onValueChange = { capacity = it },
-                        label = { Text("Capacity") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                Button(onClick = {
-                    if (roomName.isNotBlank()) {
-                        scope.launch {
-                            firebaseManager.addRoom(Room(name = roomName.trim(), capacity = capacity.toIntOrNull() ?: 30))
-                            showAddRoomDialog = false
-                        }
-                    }
-                }) {
-                    Text(strings.save)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showAddRoomDialog = false }) { Text(strings.cancel) }
-            }
-        )
-    }
-
-    editingSlot?.let { slot ->
-        EditSlotDialog(
-            slot = slot,
+    // Search dialog to find any student or teacher
+    if (showSearchDialog) {
+        UserSearchDialog(
+            firebaseManager = firebaseManager,
             strings = strings,
-            onDismiss = { editingSlot = null },
-            onSave = { updatedSlot ->
-                scope.launch {
-                    val res = firebaseManager.updateTimetableSlot(updatedSlot)
-                    if (res.isSuccess) {
-                        Toast.makeText(context, strings.save, Toast.LENGTH_SHORT).show()
-                        editingSlot = null
-                    } else {
-                        Toast.makeText(context, strings.error, Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
+            onDismiss = { showSearchDialog = false }
         )
     }
 }
 
+// ----------------------------------------------------
+// ROOM CARD COMPONENT (مرتب وواضح)
+// ----------------------------------------------------
 @Composable
-fun EditSlotDialog(
-    slot: TimetableSlot,
-    strings: com.example.localization.AppStrings,
-    onDismiss: () -> Unit,
-    onSave: (TimetableSlot) -> Unit
-) {
-    var subjectName by remember { mutableStateOf(slot.subjectName) }
-    var teacherName by remember { mutableStateOf(slot.teacherName) }
-    var groupName by remember { mutableStateOf(slot.groupName) }
-    var roomName by remember { mutableStateOf(slot.roomName) }
-    var startTime by remember { mutableStateOf(slot.startTime) }
-    var endTime by remember { mutableStateOf(slot.endTime) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(strings.editTimetableSlot) },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = subjectName,
-                    onValueChange = { subjectName = it },
-                    label = { Text(strings.subjectsTitle) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = teacherName,
-                    onValueChange = { teacherName = it },
-                    label = { Text(strings.roleTeacher) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = groupName,
-                    onValueChange = { groupName = it },
-                    label = { Text(strings.groupName) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                OutlinedTextField(
-                    value = roomName,
-                    onValueChange = { roomName = it },
-                    label = { Text(strings.roomsTitle) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = startTime,
-                        onValueChange = { startTime = it },
-                        label = { Text("Start (HH:MM)") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = endTime,
-                        onValueChange = { endTime = it },
-                        label = { Text("End (HH:MM)") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    onSave(
-                        slot.copy(
-                            subjectName = subjectName.trim(),
-                            teacherName = teacherName.trim(),
-                            groupName = groupName.trim(),
-                            roomName = roomName.trim(),
-                            startTime = startTime.trim(),
-                            endTime = endTime.trim()
-                        )
-                    )
-                }
-            ) {
-                Text(strings.save)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(strings.cancel) }
-        }
-    )
-}
-
-@Composable
-fun TimetableSlotCard(
-    slot: TimetableSlot,
-    onEdit: () -> Unit = {},
+fun RoomCardItem(
+    room: Room,
+    scheduledCount: Int,
+    strings: AppStrings,
+    onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
     Card(
@@ -455,61 +554,517 @@ fun TimetableSlotCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Surface(
-                    color = SchoolPrimary.copy(alpha = 0.1f),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Column(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(slot.startTime, fontWeight = FontWeight.Bold, color = SchoolPrimary)
-                        Text(slot.endTime, style = MaterialTheme.typography.labelSmall, color = SchoolSecondary)
-                    }
-                }
+            // Icon Box
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(SchoolPrimary.copy(alpha = 0.12f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.MeetingRoom,
+                    contentDescription = null,
+                    tint = SchoolPrimary,
+                    modifier = Modifier.size(26.dp)
+                )
             }
 
             Spacer(modifier = Modifier.width(14.dp))
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = slot.subjectName,
+                    text = room.name,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                Text(
-                    text = "👨‍🏫 ${slot.teacherName}",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = "👥 ${slot.groupName} • 📍 ${slot.roomName}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = SchoolSecondary
-                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    StatusBadge(
+                        text = "👥 ${room.capacity} طالب",
+                        color = Color(0xFF16A34A)
+                    )
+                    StatusBadge(
+                        text = "📅 $scheduledCount حصص",
+                        color = SchoolPrimary
+                    )
+                }
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onEdit) {
-                    Icon(Icons.Default.Edit, contentDescription = "Edit Slot", tint = SchoolPrimary)
+            // Edit & Delete actions
+            IconButton(onClick = onEdit) {
+                Icon(Icons.Default.Edit, contentDescription = "Edit", tint = SchoolPrimary, modifier = Modifier.size(20.dp))
+            }
+            IconButton(onClick = onDelete) {
+                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = SchoolAccentRed, modifier = Modifier.size(20.dp))
+            }
+        }
+    }
+}
+
+// ----------------------------------------------------
+// ROOM FORM DIALOG (تصميم مرتب ومنظم ومريح وواضح جداً)
+// ----------------------------------------------------
+@Composable
+fun RoomFormDialog(
+    initialRoom: Room?,
+    strings: AppStrings,
+    onDismiss: () -> Unit,
+    onSave: (name: String, capacity: Int) -> Unit
+) {
+    var name by remember { mutableStateOf(initialRoom?.name ?: "") }
+    var capacityText by remember { mutableStateOf(initialRoom?.capacity?.toString() ?: "30") }
+    var selectedFacilities by remember {
+        mutableStateOf(setOf("مسلاط ضوئي Data Show", "سبورة ذكية تفاعلية"))
+    }
+
+    val capacityPresets = listOf(15, 20, 25, 30, 40, 50)
+    val roomTypeSuggestions = listOf(
+        "قاعة تدريس" to "🏫",
+        "مختبر علوم" to "🔬",
+        "إعلام آلي" to "💻",
+        "مدرج محاضرات" to "🏛️",
+        "ورشة أنشطة" to "🎨",
+        "قاعة مطالعة" to "📚"
+    )
+
+    val availableFacilities = listOf(
+        "مسلاط ضوئي Data Show" to "📽️",
+        "سبورة ذكية تفاعلية" to "🖥️",
+        "مكيف هواء" to "❄️",
+        "شبكة Wi-Fi" to "📶",
+        "نظام صوتي ومكبرات" to "🔊"
+    )
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .wrapContentHeight()
+                .padding(vertical = 16.dp),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp)
+            ) {
+                // Header Row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(SchoolPrimary.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (initialRoom != null) Icons.Default.EditLocationAlt else Icons.Default.AddBusiness,
+                                contentDescription = null,
+                                tint = SchoolPrimary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = if (initialRoom != null) strings.editRoom else strings.addRoom,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = SchoolPrimary
+                            )
+                            Text(
+                                text = "تحديد اسم القاعة وطاقتها وتجهيزاتها",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    }
                 }
-                IconButton(onClick = onDelete) {
-                    Icon(Icons.Default.Delete, contentDescription = "Delete Slot", tint = MaterialTheme.colorScheme.error)
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Scrollable Form Sections
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // SECTION 1: Room Identity & Type (بطاقة بيانات القاعة)
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.MeetingRoom, contentDescription = null, tint = SchoolPrimary, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "1. اسم ونوع القاعة",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleSmall
+                                )
+                            }
+
+                            // Quick Category selection chips
+                            Text(
+                                text = "اختيار نوع القاعة سريعاً:",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                roomTypeSuggestions.take(3).forEach { (type, emoji) ->
+                                    FilterChip(
+                                        selected = name.contains(type),
+                                        onClick = {
+                                            name = if (name.isBlank()) type else "$type $name".trim()
+                                        },
+                                        label = { Text("$emoji $type", fontSize = 11.sp) }
+                                    )
+                                }
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                roomTypeSuggestions.drop(3).forEach { (type, emoji) ->
+                                    FilterChip(
+                                        selected = name.contains(type),
+                                        onClick = {
+                                            name = if (name.isBlank()) type else "$type $name".trim()
+                                        },
+                                        label = { Text("$emoji $type", fontSize = 11.sp) }
+                                    )
+                                }
+                            }
+
+                            OutlinedTextField(
+                                value = name,
+                                onValueChange = { name = it },
+                                label = { Text(strings.roomName + " *") },
+                                placeholder = { Text("مثال: قاعة 1، مختبر الفيزياء، مدرج ابن خلدون") },
+                                leadingIcon = { Icon(Icons.Default.DoorSliding, contentDescription = null, tint = SchoolPrimary) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("input_room_name")
+                            )
+                        }
+                    }
+
+                    // SECTION 2: Capacity & Seating (بطاقة الطاقة الاستيعابية)
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.People, contentDescription = null, tint = Color(0xFF16A34A), modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "2. الطاقة الاستيعابية (عدد المقاعد)",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleSmall
+                                )
+                            }
+
+                            // Stepper Controls (- / + 5)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                FilledTonalButton(
+                                    onClick = {
+                                        val cur = capacityText.toIntOrNull() ?: 30
+                                        if (cur > 5) capacityText = (cur - 5).toString()
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.size(46.dp),
+                                    contentPadding = PaddingValues(0.dp)
+                                ) {
+                                    Icon(Icons.Default.Remove, contentDescription = "Decrease")
+                                }
+
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color(0xFF16A34A).copy(alpha = 0.12f),
+                                    modifier = Modifier.padding(horizontal = 12.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(Icons.Default.Chair, contentDescription = null, tint = Color(0xFF16A34A), modifier = Modifier.size(20.dp))
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "$capacityText مقعداً",
+                                            fontWeight = FontWeight.ExtraBold,
+                                            style = MaterialTheme.typography.titleMedium,
+                                            color = Color(0xFF16A34A)
+                                        )
+                                    }
+                                }
+
+                                FilledTonalButton(
+                                    onClick = {
+                                        val cur = capacityText.toIntOrNull() ?: 30
+                                        capacityText = (cur + 5).toString()
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.size(46.dp),
+                                    contentPadding = PaddingValues(0.dp)
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = "Increase")
+                                }
+                            }
+
+                            // Quick Capacity Presets
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                capacityPresets.forEach { preset ->
+                                    FilterChip(
+                                        selected = capacityText == preset.toString(),
+                                        onClick = { capacityText = preset.toString() },
+                                        label = { Text("$preset", fontSize = 12.sp, fontWeight = FontWeight.Bold) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // SECTION 3: Facilities & Equipment (تجهيزات القاعة)
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Devices, contentDescription = null, tint = SchoolSecondary, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "3. التجهيزات والمرافق المتوفرة (اختياري)",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleSmall
+                                )
+                            }
+
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                availableFacilities.forEach { (facility, emoji) ->
+                                    val isSelected = selectedFacilities.contains(facility)
+                                    FilterChip(
+                                        selected = isSelected,
+                                        onClick = {
+                                            selectedFacilities = if (isSelected) {
+                                                selectedFacilities - facility
+                                            } else {
+                                                selectedFacilities + facility
+                                            }
+                                        },
+                                        label = { Text("$emoji $facility", fontSize = 12.sp) },
+                                        leadingIcon = if (isSelected) {
+                                            { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
+                                        } else null
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                // Bottom Buttons: Save & Cancel
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 48.dp)
+                    ) {
+                        Text(strings.cancel)
+                    }
+
+                    Button(
+                        onClick = {
+                            if (name.isNotBlank()) {
+                                val cap = capacityText.toIntOrNull() ?: 30
+                                onSave(name.trim(), cap)
+                            }
+                        },
+                        enabled = name.isNotBlank(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = SchoolPrimary),
+                        modifier = Modifier
+                            .weight(1.5f)
+                            .heightIn(min = 48.dp)
+                            .testTag("btn_save_room")
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(strings.save, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+// ----------------------------------------------------
+// TIMETABLE SLOT CARD COMPONENT (مرتب وواضح)
+// ----------------------------------------------------
+@Composable
+fun TimetableSlotCard(
+    slot: TimetableSlot,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            // Top Row: Time Badge + Actions
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Time Range Badge
+                Surface(
+                    color = SchoolPrimary.copy(alpha = 0.1f),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.AccessTime, contentDescription = null, tint = SchoolPrimary, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "${slot.startTime} - ${slot.endTime}",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = SchoolPrimary
+                        )
+                    }
+                }
+
+                Row {
+                    IconButton(onClick = onEdit, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Default.Edit, contentDescription = "Edit Slot", tint = SchoolPrimary, modifier = Modifier.size(18.dp))
+                    }
+                    IconButton(onClick = onDelete, modifier = Modifier.size(36.dp)) {
+                        Icon(Icons.Default.Delete, contentDescription = "Delete Slot", tint = SchoolAccentRed, modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Subject Title
+            Text(
+                text = slot.subjectName.ifEmpty { "مادة دراسية" },
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // Details Row: Teacher • Room • Group
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (slot.teacherName.isNotBlank()) {
+                    StatusBadge(
+                        text = "👨‍🏫 ${slot.teacherName}",
+                        color = Color(0xFFD97706)
+                    )
+                }
+
+                if (slot.roomName.isNotBlank()) {
+                    StatusBadge(
+                        text = "🚪 ${slot.roomName}",
+                        color = Color(0xFF16A34A)
+                    )
+                }
+
+                if (slot.groupName.isNotBlank()) {
+                    StatusBadge(
+                        text = "👥 ${slot.groupName}",
+                        color = SchoolPrimary
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ----------------------------------------------------
+// CREATE TIMETABLE SLOT DIALOG (تصميم مرتب ومنظم ومريح وواضح جداً)
+// ----------------------------------------------------
 @Composable
 fun CreateSlotDialog(
-    strings: com.example.localization.AppStrings,
+    strings: AppStrings,
     groups: List<SchoolGroup>,
     subjects: List<Subject>,
     rooms: List<Room>,
@@ -519,70 +1074,25 @@ fun CreateSlotDialog(
     onDismiss: () -> Unit,
     onCreate: (TimetableSlot) -> Unit
 ) {
-    var isManualMode by remember { mutableStateOf(true) } // Default to manual entry as requested
-
     var dayOfWeek by remember { mutableStateOf(initialDay) }
     var startTime by remember { mutableStateOf("08:00") }
     var endTime by remember { mutableStateOf("10:00") }
 
-    // Manual Entry Fields
-    var manualSubject by remember { mutableStateOf("") }
-    var manualTeacher by remember { mutableStateOf("") }
-    var manualGroup by remember { mutableStateOf("") }
-    var manualRoom by remember { mutableStateOf("") }
+    var subjectText by remember { mutableStateOf(subjects.firstOrNull()?.name ?: "") }
+    var teacherText by remember { mutableStateOf(teachers.firstOrNull()?.fullName ?: "") }
+    var groupText by remember { mutableStateOf(groups.firstOrNull()?.name ?: "") }
+    var roomText by remember { mutableStateOf(rooms.firstOrNull()?.name ?: "") }
 
-    // List Selection Fields
-    var selectedGroup by remember { mutableStateOf(groups.firstOrNull()) }
-    var selectedSubject by remember { mutableStateOf(subjects.firstOrNull()) }
-    var selectedRoom by remember { mutableStateOf(rooms.firstOrNull()) }
-    var selectedTeacher by remember { mutableStateOf(teachers.firstOrNull()) }
+    var selectedRoomObj by remember { mutableStateOf(rooms.firstOrNull()) }
+    var selectedTeacherObj by remember { mutableStateOf(teachers.firstOrNull()) }
 
-    // Conflict check for list mode
-    val conflict = remember(dayOfWeek, startTime, endTime, selectedRoom, selectedTeacher, existingSlots, isManualMode, manualRoom, manualTeacher) {
-        if (!isManualMode) {
-            val candidate = TimetableSlot(
-                dayOfWeek = dayOfWeek,
-                startTime = startTime,
-                endTime = endTime,
-                roomId = selectedRoom?.id ?: "",
-                teacherId = selectedTeacher?.id ?: ""
-            )
-
-            val roomConflict = existingSlots.any { other ->
-                other.dayOfWeek == dayOfWeek && other.roomId.isNotBlank() && other.roomId == candidate.roomId && candidate.overlapsWith(other)
-            }
-            val teacherConflict = existingSlots.any { other ->
-                other.dayOfWeek == dayOfWeek && other.teacherId.isNotBlank() && other.teacherId == candidate.teacherId && candidate.overlapsWith(other)
-            }
-
-            when {
-                roomConflict -> strings.conflictRoom
-                teacherConflict -> strings.conflictTeacher
-                else -> null
-            }
-        } else {
-            // Check conflicts for manual mode by room name and teacher name
-            val candidate = TimetableSlot(
-                dayOfWeek = dayOfWeek,
-                startTime = startTime,
-                endTime = endTime,
-                roomName = manualRoom.trim(),
-                teacherName = manualTeacher.trim()
-            )
-            val roomConflict = manualRoom.isNotBlank() && existingSlots.any { other ->
-                other.dayOfWeek == dayOfWeek && other.roomName.equals(candidate.roomName, ignoreCase = true) && candidate.overlapsWith(other)
-            }
-            val teacherConflict = manualTeacher.isNotBlank() && existingSlots.any { other ->
-                other.dayOfWeek == dayOfWeek && other.teacherName.equals(candidate.teacherName, ignoreCase = true) && candidate.overlapsWith(other)
-            }
-
-            when {
-                roomConflict -> strings.conflictRoom
-                teacherConflict -> strings.conflictTeacher
-                else -> null
-            }
-        }
-    }
+    val quickTimePresets = listOf(
+        "08:00" to "10:00",
+        "10:00" to "12:00",
+        "14:00" to "16:00",
+        "16:00" to "18:00",
+        "18:00" to "20:00"
+    )
 
     val daysList = listOf(
         1 to strings.monday,
@@ -594,267 +1104,749 @@ fun CreateSlotDialog(
         7 to strings.sunday
     )
 
-    val isFormValid = if (isManualMode) {
-        manualSubject.isNotBlank() && startTime.isNotBlank() && endTime.isNotBlank()
-    } else {
-        selectedSubject != null && selectedTeacher != null && selectedGroup != null && selectedRoom != null
+    // Intelligent Conflict Check
+    val conflict = remember(dayOfWeek, startTime, endTime, roomText, teacherText, existingSlots) {
+        val candidate = TimetableSlot(
+            dayOfWeek = dayOfWeek,
+            startTime = startTime,
+            endTime = endTime,
+            roomName = roomText.trim(),
+            teacherName = teacherText.trim()
+        )
+        val roomConflict = roomText.isNotBlank() && existingSlots.any { other ->
+            other.dayOfWeek == dayOfWeek && other.roomName.equals(candidate.roomName, ignoreCase = true) && candidate.overlapsWith(other)
+        }
+        val teacherConflict = teacherText.isNotBlank() && existingSlots.any { other ->
+            other.dayOfWeek == dayOfWeek && other.teacherName.equals(candidate.teacherName, ignoreCase = true) && candidate.overlapsWith(other)
+        }
+
+        when {
+            roomConflict -> strings.conflictRoom
+            teacherConflict -> strings.conflictTeacher
+            else -> null
+        }
     }
 
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Schedule, contentDescription = null, tint = SchoolPrimary)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(strings.addSlot, fontWeight = FontWeight.Bold)
-            }
-        },
-        text = {
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .fillMaxHeight(0.90f)
+                .padding(vertical = 12.dp),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp
+        ) {
             Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .verticalScroll(androidx.compose.foundation.rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
+                    .fillMaxSize()
+                    .padding(20.dp)
             ) {
-                // Mode Toggle: Manual Entry vs Select From Registered
-                PrimaryTabRow(
-                    selectedTabIndex = if (isManualMode) 0 else 1,
-                    modifier = Modifier.fillMaxWidth()
+                // Header with icon, title, and close button
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Tab(
-                        selected = isManualMode,
-                        onClick = { isManualMode = true },
-                        text = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(strings.manualEntry, style = MaterialTheme.typography.bodySmall)
-                            }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(SchoolPrimary.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.AddAlarm,
+                                contentDescription = null,
+                                tint = SchoolPrimary,
+                                modifier = Modifier.size(24.dp)
+                            )
                         }
-                    )
-                    Tab(
-                        selected = !isManualMode,
-                        onClick = { isManualMode = false },
-                        text = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.List, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(strings.selectFromList, style = MaterialTheme.typography.bodySmall)
-                            }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = strings.addSlot,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = SchoolPrimary
+                            )
+                            Text(
+                                text = "تنظيم الحصة وتعيين التوقيت والمادة والقاعة",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
-                    )
+                    }
+
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    }
                 }
 
-                if (conflict != null) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.errorContainer,
-                        shape = RoundedCornerShape(10.dp),
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Scrollable Form Sections
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // Conflict Warning Banner if detected
+                    if (conflict != null) {
+                        Surface(
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = conflict,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
+
+                    // SECTION 1: 🕒 Day & Time Schedule (توقيت ويوم الحصة)
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Row(modifier = Modifier.padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
-                            Spacer(modifier = Modifier.width(8.dp))
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.CalendarMonth, contentDescription = null, tint = SchoolPrimary, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "1. اختيار اليوم والتوقيت",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleSmall
+                                )
+                            }
+
+                            // Day selector chips
                             Text(
-                                text = conflict,
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                style = MaterialTheme.typography.bodySmall,
-                                fontWeight = FontWeight.Bold
+                                text = "اختر يوم الحصة:",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                daysList.take(4).forEach { (dNum, dName) ->
+                                    FilterChip(
+                                        selected = dayOfWeek == dNum,
+                                        onClick = { dayOfWeek = dNum },
+                                        label = { Text(dName, fontSize = 11.sp, fontWeight = if (dayOfWeek == dNum) FontWeight.Bold else FontWeight.Normal) }
+                                    )
+                                }
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                daysList.drop(4).forEach { (dNum, dName) ->
+                                    FilterChip(
+                                        selected = dayOfWeek == dNum,
+                                        onClick = { dayOfWeek = dNum },
+                                        label = { Text(dName, fontSize = 11.sp, fontWeight = if (dayOfWeek == dNum) FontWeight.Bold else FontWeight.Normal) }
+                                    )
+                                }
+                            }
+
+                            // Time Range: Start and End time fields side by side
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = startTime,
+                                    onValueChange = { startTime = it },
+                                    label = { Text(strings.startTime) },
+                                    placeholder = { Text("08:00") },
+                                    leadingIcon = { Icon(Icons.Default.AccessTime, contentDescription = null, tint = SchoolPrimary) },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                OutlinedTextField(
+                                    value = endTime,
+                                    onValueChange = { endTime = it },
+                                    label = { Text(strings.endTime) },
+                                    placeholder = { Text("10:00") },
+                                    leadingIcon = { Icon(Icons.Default.AccessTimeFilled, contentDescription = null, tint = SchoolPrimary) },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+
+                            // Quick Time Presets
+                            Text(
+                                text = "أوقات الحصص المعتادة:",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                quickTimePresets.forEach { (s, e) ->
+                                    val isSelected = startTime == s && endTime == e
+                                    FilterChip(
+                                        selected = isSelected,
+                                        onClick = {
+                                            startTime = s
+                                            endTime = e
+                                        },
+                                        label = { Text("$s - $e", fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // SECTION 2: 📚 Subject & Group (المادة والفوج)
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Book, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "2. المادة التعليمية والفوج",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleSmall
+                                )
+                            }
+
+                            // Subject Quick Chips if available
+                            if (subjects.isNotEmpty()) {
+                                Text(
+                                    text = "المواد المسجلة في المدرسة:",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    subjects.take(4).forEach { sb ->
+                                        FilterChip(
+                                            selected = subjectText.equals(sb.name, ignoreCase = true),
+                                            onClick = { subjectText = sb.name },
+                                            label = { Text(sb.name, fontSize = 11.sp) }
+                                        )
+                                    }
+                                }
+                            }
+
+                            OutlinedTextField(
+                                value = subjectText,
+                                onValueChange = { subjectText = it },
+                                label = { Text(strings.subjectName + " *") },
+                                placeholder = { Text("اختر أو اكتب اسم المادة (مثال: رياضيات، فيزياء)") },
+                                leadingIcon = { Icon(Icons.Default.MenuBook, contentDescription = null, tint = Color(0xFFD97706)) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("input_slot_subject")
+                            )
+
+                            // Group Quick Chips if available
+                            if (groups.isNotEmpty()) {
+                                Text(
+                                    text = "الأفواج والأقسام المسجلة:",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    groups.take(4).forEach { gr ->
+                                        FilterChip(
+                                            selected = groupText.equals(gr.name, ignoreCase = true),
+                                            onClick = { groupText = gr.name },
+                                            label = { Text(gr.name, fontSize = 11.sp) }
+                                        )
+                                    }
+                                }
+                            }
+
+                            OutlinedTextField(
+                                value = groupText,
+                                onValueChange = { groupText = it },
+                                label = { Text(strings.groupsTitle) },
+                                placeholder = { Text("اختر أو اكتب الفوج (مثال: الفوج 1، السنة أولى)") },
+                                leadingIcon = { Icon(Icons.Default.Groups, contentDescription = null, tint = SchoolPrimary) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+
+                    // SECTION 3: 👨‍🏫 Teacher Assignment (الأستاذ المسؤول)
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Person, contentDescription = null, tint = Color(0xFF2563EB), modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "3. الأستاذ المشرف على الحصة",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleSmall
+                                )
+                            }
+
+                            // Teachers chips
+                            if (teachers.isNotEmpty()) {
+                                Text(
+                                    text = "الأساتذة المسجلون في المدرسة:",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    teachers.take(4).forEach { tc ->
+                                        FilterChip(
+                                            selected = teacherText.equals(tc.fullName, ignoreCase = true),
+                                            onClick = {
+                                                teacherText = tc.fullName
+                                                selectedTeacherObj = tc
+                                            },
+                                            label = { Text("👨‍🏫 ${tc.fullName}", fontSize = 11.sp) }
+                                        )
+                                    }
+                                }
+                            }
+
+                            OutlinedTextField(
+                                value = teacherText,
+                                onValueChange = { teacherText = it },
+                                label = { Text(strings.teacherName) },
+                                placeholder = { Text("اختر أو اكتب اسم الأستاذ المسؤول") },
+                                leadingIcon = { Icon(Icons.Default.School, contentDescription = null, tint = Color(0xFF2563EB)) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                    }
+
+                    // SECTION 4: 🚪 Room & Seating (حجز القاعة الدراسية)
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.MeetingRoom, contentDescription = null, tint = Color(0xFF16A34A), modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "4. القاعة الدراسية والمكان",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleSmall
+                                )
+                            }
+
+                            // Rooms chips with capacity
+                            if (rooms.isNotEmpty()) {
+                                Text(
+                                    text = "القاعات المتاحة في المدرسة:",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    rooms.take(4).forEach { rm ->
+                                        FilterChip(
+                                            selected = roomText.equals(rm.name, ignoreCase = true),
+                                            onClick = {
+                                                roomText = rm.name
+                                                selectedRoomObj = rm
+                                            },
+                                            label = { Text("🚪 ${rm.name} (${rm.capacity} مقعد)", fontSize = 11.sp) }
+                                        )
+                                    }
+                                }
+                            }
+
+                            OutlinedTextField(
+                                value = roomText,
+                                onValueChange = { roomText = it },
+                                label = { Text(strings.roomName) },
+                                placeholder = { Text("اختر أو اكتب القاعة (مثال: قاعة 1، مختبر)") },
+                                leadingIcon = { Icon(Icons.Default.DoorSliding, contentDescription = null, tint = Color(0xFF16A34A)) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
                             )
                         }
                     }
                 }
 
-                // Day Selection
-                Text(strings.dayOfWeek, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Bottom Buttons: Save & Cancel
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    var expandedDay by remember { mutableStateOf(false) }
-                    ExposedDropdownMenuBox(
-                        expanded = expandedDay,
-                        onExpandedChange = { expandedDay = it },
-                        modifier = Modifier.fillMaxWidth()
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 48.dp)
                     ) {
-                        OutlinedTextField(
-                            value = daysList.firstOrNull { it.first == dayOfWeek }?.second ?: strings.monday,
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text(strings.dayOfWeek) },
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expandedDay) },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .menuAnchor()
-                        )
-                        ExposedDropdownMenu(
-                            expanded = expandedDay,
-                            onDismissRequest = { expandedDay = false }
-                        ) {
-                            daysList.forEach { (dNum, dName) ->
-                                DropdownMenuItem(
-                                    text = { Text(dName) },
-                                    onClick = {
-                                        dayOfWeek = dNum
-                                        expandedDay = false
-                                    }
+                        Text(strings.cancel)
+                    }
+
+                    Button(
+                        onClick = {
+                            if (subjectText.isNotBlank()) {
+                                onCreate(
+                                    TimetableSlot(
+                                        dayOfWeek = dayOfWeek,
+                                        startTime = startTime.trim(),
+                                        endTime = endTime.trim(),
+                                        subjectName = subjectText.trim(),
+                                        teacherName = teacherText.trim(),
+                                        teacherId = selectedTeacherObj?.id ?: "",
+                                        roomName = roomText.trim(),
+                                        roomId = selectedRoomObj?.id ?: "",
+                                        groupName = groupText.trim()
+                                    )
                                 )
                             }
+                        },
+                        enabled = subjectText.isNotBlank(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = SchoolPrimary),
+                        modifier = Modifier
+                            .weight(1.6f)
+                            .heightIn(min = 48.dp)
+                            .testTag("btn_confirm_add_slot")
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("حفظ وإضافة الحصة", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ----------------------------------------------------
+// EDIT TIMETABLE SLOT DIALOG (تصميم مرتب ومنظم ومريح وواضح)
+// ----------------------------------------------------
+@Composable
+fun EditSlotDialog(
+    slot: TimetableSlot,
+    strings: AppStrings,
+    onDismiss: () -> Unit,
+    onSave: (TimetableSlot) -> Unit
+) {
+    var subjectName by remember { mutableStateOf(slot.subjectName) }
+    var teacherName by remember { mutableStateOf(slot.teacherName) }
+    var roomName by remember { mutableStateOf(slot.roomName) }
+    var groupName by remember { mutableStateOf(slot.groupName) }
+    var startTime by remember { mutableStateOf(slot.startTime) }
+    var endTime by remember { mutableStateOf(slot.endTime) }
+
+    val quickTimePresets = listOf(
+        "08:00" to "10:00",
+        "10:00" to "12:00",
+        "14:00" to "16:00",
+        "16:00" to "18:00",
+        "18:00" to "20:00"
+    )
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.95f)
+                .fillMaxHeight(0.88f)
+                .padding(vertical = 12.dp),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 6.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(20.dp)
+            ) {
+                // Header
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(SchoolPrimary.copy(alpha = 0.12f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.EditCalendar, contentDescription = null, tint = SchoolPrimary, modifier = Modifier.size(24.dp))
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = strings.editTimetableSlot,
+                                fontWeight = FontWeight.Bold,
+                                style = MaterialTheme.typography.titleMedium,
+                                color = SchoolPrimary
+                            )
+                            Text(
+                                text = "تعديل تفاصيل وتوقيت الحصة الدراسية",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    IconButton(onClick = onDismiss) {
+                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Scrollable Form Sections
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    // Time Section
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.AccessTime, contentDescription = null, tint = SchoolPrimary, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("توقيت الحصة", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedTextField(
+                                    value = startTime,
+                                    onValueChange = { startTime = it },
+                                    label = { Text(strings.startTime) },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.weight(1f)
+                                )
+                                OutlinedTextField(
+                                    value = endTime,
+                                    onValueChange = { endTime = it },
+                                    label = { Text(strings.endTime) },
+                                    singleLine = true,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                quickTimePresets.forEach { (s, e) ->
+                                    FilterChip(
+                                        selected = startTime == s && endTime == e,
+                                        onClick = {
+                                            startTime = s
+                                            endTime = e
+                                        },
+                                        label = { Text("$s - $e", fontSize = 11.sp) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Details Section
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Class, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("بيانات المادة والأستاذ والقاعة", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                            }
+
+                            OutlinedTextField(
+                                value = subjectName,
+                                onValueChange = { subjectName = it },
+                                label = { Text(strings.subjectName + " *") },
+                                leadingIcon = { Icon(Icons.Default.Book, contentDescription = null, tint = Color(0xFFD97706)) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            OutlinedTextField(
+                                value = groupName,
+                                onValueChange = { groupName = it },
+                                label = { Text(strings.groupsTitle) },
+                                leadingIcon = { Icon(Icons.Default.Groups, contentDescription = null, tint = SchoolPrimary) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            OutlinedTextField(
+                                value = teacherName,
+                                onValueChange = { teacherName = it },
+                                label = { Text(strings.teacherName) },
+                                leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, tint = Color(0xFF2563EB)) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            OutlinedTextField(
+                                value = roomName,
+                                onValueChange = { roomName = it },
+                                label = { Text(strings.roomName) },
+                                leadingIcon = { Icon(Icons.Default.MeetingRoom, contentDescription = null, tint = Color(0xFF16A34A)) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
                         }
                     }
                 }
 
-                // Time Pickers
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = startTime,
-                        onValueChange = { startTime = it },
-                        label = { Text(strings.startTime) },
-                        placeholder = { Text("08:00") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                    OutlinedTextField(
-                        value = endTime,
-                        onValueChange = { endTime = it },
-                        label = { Text(strings.endTime) },
-                        placeholder = { Text("10:00") },
-                        singleLine = true,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
+                Spacer(modifier = Modifier.height(16.dp))
 
-                if (isManualMode) {
-                    // Manual Text Fields
-                    OutlinedTextField(
-                        value = manualSubject,
-                        onValueChange = { manualSubject = it },
-                        label = { Text(strings.subjectName + " *") },
-                        placeholder = { Text("مثال: رياضيات / Physique") },
-                        leadingIcon = { Icon(Icons.Default.MenuBook, contentDescription = null, tint = SchoolPrimary) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    OutlinedTextField(
-                        value = manualTeacher,
-                        onValueChange = { manualTeacher = it },
-                        label = { Text(strings.teacherName) },
-                        placeholder = { Text("مثال: أستاذ بن علي / M. Ahmed") },
-                        leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, tint = SchoolSecondary) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    OutlinedTextField(
-                        value = manualGroup,
-                        onValueChange = { manualGroup = it },
-                        label = { Text(strings.groupName) },
-                        placeholder = { Text("مثال: فوج 1 / 3AS Sciences") },
-                        leadingIcon = { Icon(Icons.Default.Groups, contentDescription = null) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-
-                    OutlinedTextField(
-                        value = manualRoom,
-                        onValueChange = { manualRoom = it },
-                        label = { Text(strings.roomName) },
-                        placeholder = { Text("مثال: قاعة 3 / Labo 1") },
-                        leadingIcon = { Icon(Icons.Default.MeetingRoom, contentDescription = null) },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                } else {
-                    // Registered Dropdown Selectors
-                    Text(strings.subjectName, style = MaterialTheme.typography.labelMedium)
-                    DropdownSelector(
-                        items = subjects,
-                        selectedItem = selectedSubject,
-                        label = { it.name },
-                        onSelect = { selectedSubject = it }
-                    )
-
-                    Text(strings.roleTeacher, style = MaterialTheme.typography.labelMedium)
-                    DropdownSelector(
-                        items = teachers,
-                        selectedItem = selectedTeacher,
-                        label = { it.fullName },
-                        onSelect = { selectedTeacher = it }
-                    )
-
-                    Text(strings.groupName, style = MaterialTheme.typography.labelMedium)
-                    DropdownSelector(
-                        items = groups,
-                        selectedItem = selectedGroup,
-                        label = { "${it.name} (${it.level})" },
-                        onSelect = { selectedGroup = it }
-                    )
-
-                    Text(strings.roomName, style = MaterialTheme.typography.labelMedium)
-                    DropdownSelector(
-                        items = rooms,
-                        selectedItem = selectedRoom,
-                        label = { it.name },
-                        onSelect = { selectedRoom = it }
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    if (isManualMode) {
-                        val trimmedSub = manualSubject.trim()
-                        val trimmedTeacher = manualTeacher.trim().ifEmpty { "-" }
-                        val trimmedGroup = manualGroup.trim().ifEmpty { "-" }
-                        val trimmedRoom = manualRoom.trim().ifEmpty { "-" }
-
-                        // Check if matches existing items for cleaner linking
-                        val matchedSub = subjects.firstOrNull { it.name.equals(trimmedSub, ignoreCase = true) }
-                        val matchedTeacher = teachers.firstOrNull { it.fullName.equals(trimmedTeacher, ignoreCase = true) }
-                        val matchedGroup = groups.firstOrNull { it.name.equals(trimmedGroup, ignoreCase = true) }
-                        val matchedRoom = rooms.firstOrNull { it.name.equals(trimmedRoom, ignoreCase = true) }
-
-                        val newSlot = TimetableSlot(
-                            subjectId = matchedSub?.id ?: "sub_${System.currentTimeMillis()}",
-                            subjectName = trimmedSub,
-                            teacherId = matchedTeacher?.id ?: "teacher_${System.currentTimeMillis()}",
-                            teacherName = trimmedTeacher,
-                            groupId = matchedGroup?.id ?: "grp_${System.currentTimeMillis()}",
-                            groupName = trimmedGroup,
-                            roomId = matchedRoom?.id ?: "room_${System.currentTimeMillis()}",
-                            roomName = trimmedRoom,
-                            dayOfWeek = dayOfWeek,
-                            startTime = startTime.trim(),
-                            endTime = endTime.trim()
-                        )
-                        onCreate(newSlot)
-                    } else if (selectedSubject != null && selectedTeacher != null && selectedGroup != null && selectedRoom != null) {
-                        val newSlot = TimetableSlot(
-                            subjectId = selectedSubject!!.id,
-                            subjectName = selectedSubject!!.name,
-                            teacherId = selectedTeacher!!.id,
-                            teacherName = selectedTeacher!!.fullName,
-                            groupId = selectedGroup!!.id,
-                            groupName = selectedGroup!!.name,
-                            roomId = selectedRoom!!.id,
-                            roomName = selectedRoom!!.name,
-                            dayOfWeek = dayOfWeek,
-                            startTime = startTime.trim(),
-                            endTime = endTime.trim()
-                        )
-                        onCreate(newSlot)
+                // Bottom Buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 48.dp)
+                    ) {
+                        Text(strings.cancel)
                     }
-                },
-                enabled = isFormValid && conflict == null
-            ) {
-                Text(strings.save)
+
+                    Button(
+                        onClick = {
+                            onSave(
+                                slot.copy(
+                                    subjectName = subjectName.trim(),
+                                    teacherName = teacherName.trim(),
+                                    roomName = roomName.trim(),
+                                    groupName = groupName.trim(),
+                                    startTime = startTime.trim(),
+                                    endTime = endTime.trim()
+                                )
+                            )
+                        },
+                        enabled = subjectName.isNotBlank(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = SchoolPrimary),
+                        modifier = Modifier
+                            .weight(1.5f)
+                            .heightIn(min = 48.dp)
+                    ) {
+                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(strings.save, fontWeight = FontWeight.Bold)
+                    }
+                }
             }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text(strings.cancel) }
         }
-    )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -863,22 +1855,23 @@ fun <T> DropdownSelector(
     items: List<T>,
     selectedItem: T?,
     label: (T) -> String,
-    onSelect: (T) -> Unit
+    onSelect: (T) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     var expanded by remember { mutableStateOf(false) }
 
     ExposedDropdownMenuBox(
         expanded = expanded,
-        onExpandedChange = { expanded = it }
+        onExpandedChange = { expanded = it },
+        modifier = modifier.fillMaxWidth()
     ) {
         OutlinedTextField(
-            value = selectedItem?.let(label) ?: "Select...",
+            value = selectedItem?.let(label) ?: "",
             onValueChange = {},
             readOnly = true,
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
-            modifier = Modifier
-                .fillMaxWidth()
-                .menuAnchor()
+            modifier = Modifier.fillMaxWidth().menuAnchor(),
+            shape = RoundedCornerShape(12.dp)
         )
         ExposedDropdownMenu(
             expanded = expanded,

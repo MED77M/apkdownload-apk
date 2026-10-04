@@ -48,15 +48,26 @@ fun AdminUsersScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
 
-    var selectedTab by remember { mutableStateOf(0) } // 0: Students, 1: Teachers, 2: Admins
+    var selectedTab by remember { mutableStateOf(0) } // 0: All, 1: Students, 2: Teachers, 3: Admins
     var searchQuery by remember { mutableStateOf("") }
 
+    val allUsers by firebaseManager.observeUsers().collectAsState(initial = emptyList())
+
     val currentRole = when (selectedTab) {
-        0 -> Role.STUDENT
-        1 -> Role.TEACHER
-        else -> Role.ADMIN
+        1 -> Role.STUDENT
+        2 -> Role.TEACHER
+        3 -> Role.ADMIN
+        else -> Role.STUDENT
     }
-    val users by firebaseManager.observeUsers(currentRole).collectAsState(initial = emptyList())
+
+    val users = remember(allUsers, selectedTab) {
+        when (selectedTab) {
+            1 -> allUsers.filter { it.role == Role.STUDENT }
+            2 -> allUsers.filter { it.role == Role.TEACHER }
+            3 -> allUsers.filter { it.role == Role.ADMIN }
+            else -> allUsers
+        }
+    }
 
     val filteredUsers = remember(users, searchQuery) {
         if (searchQuery.isBlank()) users
@@ -71,14 +82,16 @@ fun AdminUsersScreen(
     var userToEdit by remember { mutableStateOf<SchoolUser?>(null) }
     var userToDelete by remember { mutableStateOf<SchoolUser?>(null) }
     var newlyCreatedCredentials by remember { mutableStateOf<Pair<String, String>?>(null) } // (username, password)
+    var showSearchDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
             AppHeader(
                 title = strings.usersTitle,
                 subtitle = when (selectedTab) {
-                    0 -> strings.studentsTab
-                    1 -> strings.teachersTab
+                    0 -> strings.allUsersTab
+                    1 -> strings.studentsTab
+                    2 -> strings.teachersTab
                     else -> strings.manageAdmins
                 },
                 currentLanguage = currentLanguage,
@@ -89,6 +102,18 @@ fun AdminUsersScreen(
                         modifier = Modifier.size(48.dp)
                     ) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    }
+                },
+                actions = {
+                    IconButton(
+                        onClick = { showSearchDialog = true },
+                        modifier = Modifier.size(48.dp).testTag("btn_users_header_search")
+                    ) {
+                        Icon(
+                            Icons.Default.PersonSearch,
+                            contentDescription = strings.searchUsersTitle,
+                            tint = Color.White
+                        )
                     }
                 }
             )
@@ -102,9 +127,10 @@ fun AdminUsersScreen(
                 text = {
                     Text(
                         when (selectedTab) {
-                            0 -> strings.addStudent
-                            1 -> strings.addTeacher
-                            else -> strings.addAdmin
+                            1 -> strings.addStudent
+                            2 -> strings.addTeacher
+                            3 -> strings.addAdmin
+                            else -> strings.addStudent
                         }
                     )
                 },
@@ -117,30 +143,38 @@ fun AdminUsersScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // Tab Selector
-            TabRow(
+            // Tab Selector: All | Students | Teachers | Admins
+            ScrollableTabRow(
                 selectedTabIndex = selectedTab,
                 containerColor = MaterialTheme.colorScheme.surface,
-                contentColor = SchoolPrimary
+                contentColor = SchoolPrimary,
+                edgePadding = 8.dp
             ) {
                 Tab(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
-                    text = { Text(strings.studentsTab, fontWeight = FontWeight.Bold) },
-                    icon = { Icon(Icons.Default.Groups, contentDescription = null) },
-                    modifier = Modifier.heightIn(min = 48.dp).testTag("tab_students")
+                    text = { Text("${strings.allUsersTab} (${allUsers.size})", fontWeight = FontWeight.Bold) },
+                    icon = { Icon(Icons.Default.People, contentDescription = null) },
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("tab_all")
                 )
                 Tab(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
-                    text = { Text(strings.teachersTab, fontWeight = FontWeight.Bold) },
-                    icon = { Icon(Icons.Default.School, contentDescription = null) },
-                    modifier = Modifier.heightIn(min = 48.dp).testTag("tab_teachers")
+                    text = { Text("${strings.studentsTab} (${allUsers.count { it.role == Role.STUDENT }})", fontWeight = FontWeight.Bold) },
+                    icon = { Icon(Icons.Default.Groups, contentDescription = null) },
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("tab_students")
                 )
                 Tab(
                     selected = selectedTab == 2,
                     onClick = { selectedTab = 2 },
-                    text = { Text(strings.adminsTab, fontWeight = FontWeight.Bold) },
+                    text = { Text("${strings.teachersTab} (${allUsers.count { it.role == Role.TEACHER }})", fontWeight = FontWeight.Bold) },
+                    icon = { Icon(Icons.Default.School, contentDescription = null) },
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("tab_teachers")
+                )
+                Tab(
+                    selected = selectedTab == 3,
+                    onClick = { selectedTab = 3 },
+                    text = { Text("${strings.adminsTab} (${allUsers.count { it.role == Role.ADMIN }})", fontWeight = FontWeight.Bold) },
                     icon = { Icon(Icons.Default.AdminPanelSettings, contentDescription = null) },
                     modifier = Modifier.heightIn(min = 48.dp).testTag("tab_admins")
                 )
@@ -315,6 +349,14 @@ fun AdminUsersScreen(
                     Text(strings.close)
                 }
             }
+        )
+    }
+
+    if (showSearchDialog) {
+        UserSearchDialog(
+            firebaseManager = firebaseManager,
+            strings = strings,
+            onDismiss = { showSearchDialog = false }
         )
     }
 }

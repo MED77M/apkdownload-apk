@@ -1,6 +1,7 @@
 package com.example.ui.admin
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -36,9 +37,12 @@ fun AdminDashboardScreen(
     onNavigateToFinance: () -> Unit,
     onNavigateToReports: () -> Unit,
     onNavigateToAnnouncements: () -> Unit,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    onOpenConversation: ((userId: String, title: String) -> Unit)? = null
 ) {
     val strings = Translations.get(currentLanguage)
+
+    var showSearchDialog by remember { mutableStateOf(false) }
 
     val users by firebaseManager.observeUsers().collectAsState(initial = emptyList())
     val groups by firebaseManager.observeGroups().collectAsState(initial = emptyList())
@@ -81,7 +85,19 @@ fun AdminDashboardScreen(
                 subtitle = strings.roleAdmin,
                 currentLanguage = currentLanguage,
                 onLanguageChange = onLanguageChange,
-                onLogoutClick = onLogout
+                onLogoutClick = onLogout,
+                actions = {
+                    IconButton(
+                        onClick = { showSearchDialog = true },
+                        modifier = Modifier.size(48.dp).testTag("btn_header_search")
+                    ) {
+                        Icon(
+                            Icons.Default.PersonSearch,
+                            contentDescription = strings.searchUsersTitle,
+                            tint = Color.White
+                        )
+                    }
+                }
             )
         }
     ) { paddingValues ->
@@ -93,6 +109,37 @@ fun AdminDashboardScreen(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+            // Quick Search Bar Card (البحث عن أي تلميذ أو أستاذ)
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { showSearchDialog = true }
+                    .testTag("card_search_users")
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 13.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Search,
+                        contentDescription = null,
+                        tint = SchoolPrimary,
+                        modifier = Modifier.size(22.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = strings.searchUsersPlaceholder,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
             // Stat Cards Grid
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -255,6 +302,15 @@ fun AdminDashboardScreen(
                 }
             }
         }
+    }
+
+    if (showSearchDialog) {
+        UserSearchDialog(
+            firebaseManager = firebaseManager,
+            strings = strings,
+            onDismiss = { showSearchDialog = false },
+            onOpenConversation = onOpenConversation
+        )
     }
 }
 
