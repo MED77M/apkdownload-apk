@@ -81,6 +81,11 @@ fun ChatConversationScreen(
     }
 
     val messages by firebaseManager.observeMessages(conversationId).collectAsState(initial = emptyList())
+    val conversation by firebaseManager.observeConversation(conversationId).collectAsState(initial = null)
+
+    val isPending = conversation?.status == "PENDING"
+    val isIncomingRequest = isPending && conversation?.requestReceiverId == currentUser.id
+    val isSentRequest = isPending && conversation?.requestSenderId == currentUser.id
 
     var inputText by remember { mutableStateOf("") }
     var isRecording by remember { mutableStateOf(false) }
@@ -275,6 +280,87 @@ fun ChatConversationScreen(
                 .padding(paddingValues)
                 .imePadding()
         ) {
+            // Student Privacy Request Banner
+            if (isIncomingRequest) {
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFEFF6FF)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Security, contentDescription = null, tint = Color(0xFF2563EB))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("🔒 طلب محادثة وارد", fontWeight = FontWeight.Bold, color = Color(0xFF1E40AF))
+                        }
+                        Text(
+                            "لحماية خصوصية الطلاب، يتطلب بدء المراسلة موافقتك. هل توافق على قبول المحادثة؟",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF1E3A8A)
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        firebaseManager.acceptChatRequest(conversationId)
+                                        Toast.makeText(context, "تم قبول طلب المحادثة بنجاح", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A)),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("قبول المحادثة")
+                            }
+                            OutlinedButton(
+                                onClick = {
+                                    scope.launch {
+                                        firebaseManager.declineChatRequest(conversationId)
+                                        Toast.makeText(context, "تم رفض الطلب", Toast.LENGTH_SHORT).show()
+                                        onBack()
+                                    }
+                                },
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFDC2626)),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("رفض")
+                            }
+                        }
+                    }
+                }
+            } else if (isSentRequest) {
+                Card(
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF3C7)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(Icons.Default.HourglassTop, contentDescription = null, tint = Color(0xFFD97706))
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Text(
+                            "تم إرسال طلب المحادثة. في انتظار موافقة الطرف الآخر لبدء تبادل الرسائل.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF92400E)
+                        )
+                    }
+                }
+            }
+
             // Messages List
             LazyColumn(
                 state = listState,
@@ -378,18 +464,46 @@ fun ChatConversationScreen(
                 }
             }
 
-            // Input Bar
-            Surface(
-                tonalElevation = 4.dp,
-                shadowElevation = 4.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 6.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            // Input Bar or Pending Notice
+            if (isPending) {
+                Surface(
+                    tonalElevation = 2.dp,
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (isIncomingRequest) "يرجى قبول طلب المحادثة أعلاه لتتمكن من إرسال الرسائل." else "بانتظار موافقة الطرف الآخر على طلب المحادثة...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            } else {
+                Surface(
+                    tonalElevation = 4.dp,
+                    shadowElevation = 4.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 6.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                     // Document Attachment Button (PDF, Word, etc.)
                     IconButton(
                         onClick = {
@@ -471,6 +585,7 @@ fun ChatConversationScreen(
             }
         }
     }
+}
 
     // Full Screen Image Viewer Modal
     fullScreenImageUrl?.let { imageUrl ->

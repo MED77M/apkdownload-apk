@@ -45,9 +45,42 @@ fun TeacherGradesScreen(
 
     val canEditGrades = currentTeacher?.teacherPermissions?.canEditGrades ?: true
 
-    val grades by firebaseManager.observeGrades().collectAsState(initial = emptyList())
-    val students by firebaseManager.observeUsers(Role.STUDENT).collectAsState(initial = emptyList())
-    val subjects by firebaseManager.observeSubjects().collectAsState(initial = emptyList())
+    val allGrades by firebaseManager.observeGrades().collectAsState(initial = emptyList())
+    val allStudents by firebaseManager.observeUsers(Role.STUDENT).collectAsState(initial = emptyList())
+    val allSubjects by firebaseManager.observeSubjects().collectAsState(initial = emptyList())
+    val enrollments by firebaseManager.observeEnrollments().collectAsState(initial = emptyList())
+    val timetableSlots by firebaseManager.observeTimetable().collectAsState(initial = emptyList())
+    val groups by firebaseManager.observeGroups().collectAsState(initial = emptyList())
+
+    // Strictly filter students enrolled in this teacher's subject / classes
+    val enrolledStudents = remember(allStudents, currentTeacher, enrollments, timetableSlots, groups) {
+        if (currentTeacher == null) emptyList()
+        else {
+            allStudents.filter { student ->
+                firebaseManager.isStudentEnrolledWithTeacher(student, currentTeacher, enrollments, timetableSlots, groups)
+            }
+        }
+    }
+
+    val enrolledStudentIds = remember(enrolledStudents) { enrolledStudents.map { it.id }.toSet() }
+
+    // Filter teacher subjects
+    val teacherSubjects = remember(allSubjects, currentTeacher) {
+        if (currentTeacher?.subjectIds.isNullOrEmpty()) allSubjects
+        else allSubjects.filter { currentTeacher?.subjectIds?.contains(it.id) == true }
+    }
+
+    // Filter grades to this teacher's subjects and enrolled students
+    val grades = remember(allGrades, currentTeacher, enrolledStudentIds) {
+        if (currentTeacher == null) emptyList()
+        else {
+            allGrades.filter { grade ->
+                grade.teacherId == currentTeacher.id ||
+                (currentTeacher.subjectIds.isNotEmpty() && currentTeacher.subjectIds.contains(grade.subjectId)) ||
+                enrolledStudentIds.contains(grade.studentId)
+            }
+        }
+    }
 
     var showAddGradeDialog by remember { mutableStateOf(false) }
     var editingGrade by remember { mutableStateOf<GradeItem?>(null) }
@@ -191,8 +224,8 @@ fun TeacherGradesScreen(
     if (showAddGradeDialog) {
         AddGradeDialog(
             strings = strings,
-            students = students,
-            subjects = subjects,
+            students = enrolledStudents,
+            subjects = teacherSubjects,
             onDismiss = { showAddGradeDialog = false },
             onAdd = { grade ->
                 scope.launch {

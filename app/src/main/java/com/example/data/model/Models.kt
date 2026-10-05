@@ -542,7 +542,10 @@ data class ChatConversation(
     val creatorId: String = "",
     val lastMessage: String = "",
     val lastMessageTime: Long = System.currentTimeMillis(),
-    val unreadMap: Map<String, Int> = emptyMap()
+    val unreadMap: Map<String, Int> = emptyMap(),
+    val status: String = "ACCEPTED", // "PENDING", "ACCEPTED", "REJECTED"
+    val requestSenderId: String = "",
+    val requestReceiverId: String = ""
 ) {
     fun toMap(): Map<String, Any> = mapOf(
         "name" to name,
@@ -552,7 +555,10 @@ data class ChatConversation(
         "creatorId" to creatorId,
         "lastMessage" to lastMessage,
         "lastMessageTime" to lastMessageTime,
-        "unreadMap" to unreadMap
+        "unreadMap" to unreadMap,
+        "status" to status,
+        "requestSenderId" to requestSenderId,
+        "requestReceiverId" to requestReceiverId
     )
 }
 

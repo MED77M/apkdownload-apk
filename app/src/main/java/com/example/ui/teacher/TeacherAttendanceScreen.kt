@@ -50,6 +50,8 @@ fun TeacherAttendanceScreen(
 
     val allStudents by firebaseManager.observeUsers(Role.STUDENT).collectAsState(initial = emptyList())
     val allAttendance by firebaseManager.observeAttendance().collectAsState(initial = emptyList())
+    val enrollments by firebaseManager.observeEnrollments().collectAsState(initial = emptyList())
+    val groups by firebaseManager.observeGroups().collectAsState(initial = emptyList())
 
     val todayDate = remember {
         SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
@@ -59,12 +61,19 @@ fun TeacherAttendanceScreen(
         allAttendance.firstOrNull { it.slotId == selectedSlot?.id && it.date == todayDate }
     }
 
-    // Filter students by slot's group if defined, else all students
-    val studentsInGroup = remember(allStudents, selectedSlot) {
-        if (selectedSlot == null) allStudents
+    // Filter students strictly by slot's group and teacher's enrolled students
+    val studentsInGroup = remember(allStudents, selectedSlot, currentTeacher, enrollments, slots, groups) {
+        if (currentTeacher == null) emptyList()
         else {
-            val matched = allStudents.filter { it.groupIds.contains(selectedSlot?.groupId) }
-            if (matched.isNotEmpty()) matched else allStudents
+            val enrolledStudents = allStudents.filter { student ->
+                firebaseManager.isStudentEnrolledWithTeacher(student, currentTeacher, enrollments, slots, groups)
+            }
+            if (selectedSlot != null && selectedSlot?.groupId?.isNotBlank() == true) {
+                val matched = enrolledStudents.filter { it.groupIds.contains(selectedSlot?.groupId) }
+                if (matched.isNotEmpty()) matched else enrolledStudents
+            } else {
+                enrolledStudents
+            }
         }
     }
 

@@ -42,10 +42,25 @@ fun TeacherHomeworkScreen(
     val scope = rememberCoroutineScope()
     val currentTeacher = firebaseManager.currentUser
 
-    val homeworkList by firebaseManager.observeHomework().collectAsState(initial = emptyList())
+    val allHomework by firebaseManager.observeHomework().collectAsState(initial = emptyList())
     val groups by firebaseManager.observeGroups().collectAsState(initial = emptyList())
-    val subjects by firebaseManager.observeSubjects().collectAsState(initial = emptyList())
+    val allSubjects by firebaseManager.observeSubjects().collectAsState(initial = emptyList())
     val allStudents by firebaseManager.observeUsers(Role.STUDENT).collectAsState(initial = emptyList())
+
+    val homeworkList = remember(allHomework, currentTeacher) {
+        if (currentTeacher == null) emptyList()
+        else {
+            allHomework.filter { hw ->
+                hw.authorTeacherId == currentTeacher.id ||
+                (currentTeacher.subjectIds.isNotEmpty() && currentTeacher.subjectIds.contains(hw.subjectId))
+            }
+        }
+    }
+
+    val subjects = remember(allSubjects, currentTeacher) {
+        if (currentTeacher?.subjectIds.isNullOrEmpty()) allSubjects
+        else allSubjects.filter { currentTeacher?.subjectIds?.contains(it.id) == true }
+    }
 
     var showCreateDialog by remember { mutableStateOf(false) }
     var selectedHomeworkForSubmissions by remember { mutableStateOf<Homework?>(null) }

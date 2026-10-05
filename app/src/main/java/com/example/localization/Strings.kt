@@ -204,6 +204,14 @@ interface AppStrings {
     val replies: String
     val moderationNotice: String
     val deleteMessage: String
+    val chatRequestTitle: String
+    val chatRequestDesc: String
+    val chatRequestPending: String
+    val acceptRequest: String
+    val declineRequest: String
+    val requestChat: String
+    val studentPrivacyNotice: String
+    val onlyRegisteredStudentsNotice: String
 
     // Common
     val save: String
@@ -546,6 +554,14 @@ class ArabicStrings : AppStrings {
     override val replies: String = "الإجابات"
     override val moderationNotice: String = "وضع مراقبة المحادثات من قبل الإدارة"
     override val deleteMessage: String = "حذف الرسالة المخالفة"
+    override val chatRequestTitle: String = "طلب محادثة خاص"
+    override val chatRequestDesc: String = "لحماية خصوصية الطلاب، يتطلب بدء المراسلة موافقة الطرف الآخر أولاً."
+    override val chatRequestPending: String = "طلب المحادثة قيد الانتظار... لا يمكن إرسال الرسائل حتى تتم الموافقة."
+    override val acceptRequest: String = "قبول المحادثة"
+    override val declineRequest: String = "رفض الطلب"
+    override val requestChat: String = "طلب مراسلة"
+    override val studentPrivacyNotice: String = "🔒 خصوصية محمية: معلومات الاتصال الخاصة بالطلاب مخفية تماماً عن بقية الطلاب."
+    override val onlyRegisteredStudentsNotice: String = "يظهر فقط الطلاب المسجلون في مادتك وفصولك الدراسية."
 
     override val save: String = "حفظ"
     override val cancel: String = "إلغاء"
@@ -883,6 +899,14 @@ class EnglishStrings : AppStrings {
     override val replies: String = "Replies"
     override val moderationNotice: String = "Admin Moderation View Active"
     override val deleteMessage: String = "Delete Violating Message"
+    override val chatRequestTitle: String = "Private Chat Request"
+    override val chatRequestDesc: String = "To protect student privacy, messaging requires approval from the recipient first."
+    override val chatRequestPending: String = "Chat request is pending approval... Messages cannot be sent until accepted."
+    override val acceptRequest: String = "Accept Chat"
+    override val declineRequest: String = "Decline Request"
+    override val requestChat: String = "Request Chat"
+    override val studentPrivacyNotice: String = "🔒 Protected Privacy: Student contact information is strictly hidden from other students."
+    override val onlyRegisteredStudentsNotice: String = "Showing only students enrolled in your subjects and classes."
 
     override val save: String = "Save"
     override val cancel: String = "Cancel"
@@ -1220,6 +1244,14 @@ class FrenchStrings : AppStrings {
     override val replies: String = "Réponses"
     override val moderationNotice: String = "Modération active par l'administration"
     override val deleteMessage: String = "Supprimer le message"
+    override val chatRequestTitle: String = "Demande de discussion privée"
+    override val chatRequestDesc: String = "Pour protéger la confidentialité des élèves, l'envoi de messages nécessite l'accord du destinataire."
+    override val chatRequestPending: String = "Demande de discussion en attente... Impossible d'envoyer des messages avant acceptation."
+    override val acceptRequest: String = "Accepter"
+    override val declineRequest: String = "Refuser"
+    override val requestChat: String = "Demander une discussion"
+    override val studentPrivacyNotice: String = "🔒 Confidentialité protégée : Les coordonnées des élèves sont strictement masquées aux autres élèves."
+    override val onlyRegisteredStudentsNotice: String = "Seuls les élèves inscrits dans vos matières et classes sont affichés."
 
     override val save: String = "Enregistrer"
     override val cancel: String = "Annuler"

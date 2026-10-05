@@ -917,6 +917,34 @@ class FirebaseManager private constructor(private val context: Context) {
         return Result.failure(Exception("يرجى التواصل مع مسؤول النظام."))
     }
 
+    suspend fun getUser(idOrUsername: String): SchoolUser? {
+        val clean = idOrUsername.trim().lowercase().removePrefix("@")
+        if (clean.isBlank()) return null
+        val inMemory = LocalDataStore.usersFlow.value.firstOrNull {
+            it.id == clean || it.username.trim().lowercase() == clean
+        }
+        if (inMemory != null) return inMemory
+
+        val db = firestore ?: return null
+        return try {
+            // Try by document ID
+            val doc = db.collection("users").document(clean).get().await()
+            if (doc != null && doc.exists() && doc.data != null) {
+                return SchoolUser.fromMap(doc.id, doc.data ?: emptyMap())
+            }
+            // Try by username field
+            val snap = db.collection("users").whereEqualTo("username", clean).limit(1).get().await()
+            if (snap != null && !snap.isEmpty) {
+                val match = snap.documents.first()
+                return SchoolUser.fromMap(match.id, match.data ?: emptyMap())
+            }
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "getUser error: ${e.message}")
+            null
+        }
+    }
+
     fun observeUsers(role: Role? = null): Flow<List<SchoolUser>> {
         if (!isUsingCustomDatabase() || firestore == null) {
             return LocalDataStore.usersFlow.map { list ->
@@ -2218,15 +2246,71 @@ class FirebaseManager private constructor(private val context: Context) {
     }
 
     // ----------------------------------------------------
-    // CHAT SYSTEM
+    // CHAT SYSTEM & PRIVACY HELPERS
     // ----------------------------------------------------
+
+    fun isStudentEnrolledWithTeacher(
+        student: SchoolUser,
+        teacher: SchoolUser,
+        enrollments: List<Enrollment> = emptyList(),
+        timetableSlots: List<TimetableSlot> = emptyList(),
+        groups: List<SchoolGroup> = emptyList()
+    ): Boolean {
+        if (student.role != Role.STUDENT || teacher.role != Role.TEACHER) return false
+
+        // 1. Direct active enrollment record with this teacher or teacher's subject
+        if (enrollments.any { it.studentId == student.id && (it.teacherId == teacher.id || teacher.subjectIds.contains(it.subjectId)) && it.status == "active" }) {
+            return true
+        }
+        // 2. Shared subject ID
+        if (student.subjectIds.isNotEmpty() && teacher.subjectIds.isNotEmpty()) {
+            if (student.subjectIds.any { teacher.subjectIds.contains(it) }) return true
+        }
+        // 3. Timetable slot match: teacher teaches a group that student belongs to
+        val teacherTaughtGroupIds = timetableSlots.filter { it.teacherId == teacher.id }.map { it.groupId }.filter { it.isNotBlank() }
+        if (teacherTaughtGroupIds.isNotEmpty() && student.groupIds.any { teacherTaughtGroupIds.contains(it) }) {
+            return true
+        }
+        // 4. Group studentIds: student is in a group that teacher teaches
+        val teacherTaughtGroups = groups.filter { teacherTaughtGroupIds.contains(it.id) }
+        if (teacherTaughtGroups.any { it.studentIds.contains(student.id) }) {
+            return true
+        }
+        // 5. Timetable slot subject match
+        val teacherTimetableSubjectIds = timetableSlots.filter { it.teacherId == teacher.id }.map { it.subjectId }.filter { it.isNotBlank() }
+        if (teacherTimetableSubjectIds.isNotEmpty() && student.subjectIds.any { teacherTimetableSubjectIds.contains(it) }) {
+            return true
+        }
+        return false
+    }
 
     suspend fun createOrGetConversation(
         participantIds: List<String>,
         name: String,
         isGroup: Boolean,
-        creatorId: String = ""
+        creatorId: String = "",
+        initialStatus: String? = null
     ): Result<String> {
+        var targetUser = if (!isGroup && participantIds.size == 2) {
+            val otherId = participantIds.firstOrNull { it != creatorId }
+            LocalDataStore.usersFlow.value.firstOrNull { it.id == otherId }
+        } else null
+
+        if (targetUser == null && isUsingCustomDatabase() && firestore != null && !isGroup && participantIds.size == 2) {
+            val otherId = participantIds.firstOrNull { it != creatorId } ?: ""
+            if (otherId.isNotBlank()) {
+                targetUser = getUser(otherId)
+            }
+        }
+
+        val isStudentToStudent = !isGroup && participantIds.size == 2 &&
+                currentUser?.role == Role.STUDENT &&
+                (targetUser?.role == Role.STUDENT || (targetUser == null && !name.contains("أستاذ") && !name.contains("Teacher") && !name.contains("Admin") && !name.contains("مدير")))
+
+        val effectiveStatus = initialStatus ?: if (isStudentToStudent) "PENDING" else "ACCEPTED"
+        val reqSender = if (effectiveStatus == "PENDING") creatorId else ""
+        val reqReceiver = if (effectiveStatus == "PENDING") (participantIds.firstOrNull { it != creatorId } ?: "") else ""
+
         if (!isUsingCustomDatabase() || firestore == null) {
             val existing = LocalDataStore.conversationsFlow.value.firstOrNull { conv ->
                 !conv.isGroup && !isGroup && conv.participantIds.containsAll(participantIds) && participantIds.containsAll(conv.participantIds)
@@ -2241,7 +2325,10 @@ class FirebaseManager private constructor(private val context: Context) {
                 participantIds = participantIds,
                 creatorId = creatorId,
                 lastMessage = "",
-                lastMessageTime = System.currentTimeMillis()
+                lastMessageTime = System.currentTimeMillis(),
+                status = effectiveStatus,
+                requestSenderId = reqSender,
+                requestReceiverId = reqReceiver
             )
             LocalDataStore.conversationsFlow.value = listOf(newConv) + LocalDataStore.conversationsFlow.value
             return Result.success(id)
@@ -2271,12 +2358,77 @@ class FirebaseManager private constructor(private val context: Context) {
                 participantIds = participantIds,
                 creatorId = creatorId,
                 lastMessage = "",
-                lastMessageTime = System.currentTimeMillis()
+                lastMessageTime = System.currentTimeMillis(),
+                status = effectiveStatus,
+                requestSenderId = reqSender,
+                requestReceiverId = reqReceiver
             )
             docRef.set(conv.toMap()).await()
             Result.success(docRef.id)
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    suspend fun acceptChatRequest(conversationId: String): Result<Unit> {
+        if (!isUsingCustomDatabase() || firestore == null) {
+            LocalDataStore.conversationsFlow.value = LocalDataStore.conversationsFlow.value.map {
+                if (it.id == conversationId) it.copy(status = "ACCEPTED") else it
+            }
+            return Result.success(Unit)
+        }
+        val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
+        return try {
+            db.collection("conversations").document(conversationId)
+                .update("status", "ACCEPTED")
+                .await()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun declineChatRequest(conversationId: String): Result<Unit> {
+        return deleteConversation(conversationId)
+    }
+
+    fun observeConversation(conversationId: String): Flow<ChatConversation?> {
+        if (!isUsingCustomDatabase() || firestore == null) {
+            return LocalDataStore.conversationsFlow.map { list ->
+                list.firstOrNull { it.id == conversationId }
+            }
+        }
+        return callbackFlow {
+            val db = firestore
+            if (db == null) {
+                trySend(null)
+                close()
+                return@callbackFlow
+            }
+            val listener = db.collection("conversations").document(conversationId)
+                .addSnapshotListener { snap, _ ->
+                    if (snap != null && snap.exists()) {
+                        @Suppress("UNCHECKED_CAST")
+                        val conv = ChatConversation(
+                            id = snap.id,
+                            name = snap.getString("name") ?: "",
+                            isGroup = snap.getBoolean("isGroup") ?: false,
+                            photoUrl = snap.getString("photoUrl") ?: "",
+                            participantIds = (snap.get("participantIds") as? List<*>)?.filterIsInstance<String>() ?: emptyList(),
+                            creatorId = snap.getString("creatorId") ?: "",
+                            lastMessage = snap.getString("lastMessage") ?: "",
+                            lastMessageTime = snap.getLong("lastMessageTime") ?: System.currentTimeMillis(),
+                            unreadMap = (snap.get("unreadMap") as? Map<String, Long>)?.mapValues { entry -> entry.value.toInt() } ?: emptyMap(),
+                            status = snap.getString("status") ?: "ACCEPTED",
+                            requestSenderId = snap.getString("requestSenderId") ?: "",
+                            requestReceiverId = snap.getString("requestReceiverId") ?: ""
+                        )
+                        trySend(conv)
+                    } else {
+                        trySend(null)
+                    }
+                }
+            awaitClose { listener.remove() }
         }
     }
 
@@ -2345,7 +2497,10 @@ class FirebaseManager private constructor(private val context: Context) {
                         creatorId = it.getString("creatorId") ?: "",
                         lastMessage = it.getString("lastMessage") ?: "",
                         lastMessageTime = it.getLong("lastMessageTime") ?: System.currentTimeMillis(),
-                        unreadMap = (it.get("unreadMap") as? Map<String, Long>)?.mapValues { entry -> entry.value.toInt() } ?: emptyMap()
+                        unreadMap = (it.get("unreadMap") as? Map<String, Long>)?.mapValues { entry -> entry.value.toInt() } ?: emptyMap(),
+                        status = it.getString("status") ?: "ACCEPTED",
+                        requestSenderId = it.getString("requestSenderId") ?: "",
+                        requestReceiverId = it.getString("requestReceiverId") ?: ""
                     )
                 }?.sortedByDescending { it.lastMessageTime } ?: emptyList()
                 trySend(list)
