@@ -43,23 +43,49 @@ fun StudentDashboardScreen(
     val currentStudent = liveStudent ?: firebaseManager.currentUser
 
     val allTimetableSlots by firebaseManager.observeTimetable().collectAsState(initial = emptyList())
-    val studentSubjectIds = currentStudent?.subjectIds ?: emptyList()
-    val studentGroupIds = currentStudent?.groupIds ?: emptyList()
-    val slots = remember(allTimetableSlots, studentSubjectIds, studentGroupIds) {
-        if (studentGroupIds.isEmpty() && studentSubjectIds.isEmpty()) {
-            allTimetableSlots.take(3)
-        } else {
-            allTimetableSlots.filter { slot ->
-                (studentGroupIds.isNotEmpty() && studentGroupIds.contains(slot.groupId)) ||
-                (studentSubjectIds.isNotEmpty() && studentSubjectIds.contains(slot.subjectId))
-            }
-        }
-    }
+    val allSubjects by firebaseManager.observeSubjects().collectAsState(initial = emptyList())
+    val allGroups by firebaseManager.observeGroups().collectAsState(initial = emptyList())
     val myGrades by firebaseManager.observeGrades(studentId = currentStudent?.id).collectAsState(initial = emptyList())
     val attendanceRecords by firebaseManager.observeAttendance().collectAsState(initial = emptyList())
     val announcements by firebaseManager.observeAnnouncements().collectAsState(initial = emptyList())
     val myEnrollments by firebaseManager.observeEnrollments(studentId = currentStudent?.id).collectAsState(initial = emptyList())
     val myPayments by firebaseManager.observePayments(studentId = currentStudent?.id).collectAsState(initial = emptyList())
+
+    val studentSubjectIds = remember(currentStudent, myEnrollments) {
+        val fromUser = currentStudent?.subjectIds ?: emptyList()
+        val fromEnrollments = myEnrollments.filter {
+            it.studentId == currentStudent?.id && (it.status.equals("ACTIVE", ignoreCase = true) || it.status.isBlank())
+        }.map { it.subjectId }
+        (fromUser + fromEnrollments).filter { it.isNotBlank() }.distinct()
+    }
+    val studentGroupIds = remember(currentStudent) {
+        currentStudent?.groupIds ?: emptyList()
+    }
+
+    val slots = remember(allTimetableSlots, studentSubjectIds, studentGroupIds, allSubjects, myEnrollments, allGroups, currentStudent) {
+        val student = currentStudent
+        if (student == null) {
+            emptyList()
+        } else {
+            val studentSubjectsList = allSubjects.filter { studentSubjectIds.contains(it.id) }
+
+            allTimetableSlots.filter { slot ->
+                val matchesGroup = (slot.groupId.isNotBlank() && studentGroupIds.contains(slot.groupId)) ||
+                    (slot.groupName.isNotBlank() && allGroups.any { grp ->
+                        grp.name.equals(slot.groupName, ignoreCase = true) && (studentGroupIds.contains(grp.id) || grp.studentIds.contains(student.id))
+                    })
+
+                val matchesSubjectId = slot.subjectId.isNotBlank() && studentSubjectIds.contains(slot.subjectId)
+
+                val matchesSubjectNameAndLevel = slot.subjectName.isNotBlank() && studentSubjectsList.any { s ->
+                    s.name.equals(slot.subjectName, ignoreCase = true) &&
+                    (slot.level.isBlank() || s.level.isBlank() || s.level.equals(slot.level, ignoreCase = true))
+                }
+
+                matchesGroup || matchesSubjectId || matchesSubjectNameAndLevel
+            }
+        }
+    }
 
     // Student attendance rate
     val attendanceRate = remember(attendanceRecords, currentStudent) {

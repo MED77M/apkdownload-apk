@@ -41,7 +41,7 @@ import com.example.ui.theme.SchoolPrimary
 import com.example.ui.theme.SchoolSecondary
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun AdminTimetableScreen(
     firebaseManager: FirebaseManager,
@@ -424,6 +424,11 @@ fun AdminTimetableScreen(
         EditSlotDialog(
             slot = slot,
             strings = strings,
+            groups = groups,
+            subjects = subjects,
+            rooms = rooms,
+            teachers = teachers,
+            existingSlots = slots,
             onDismiss = { editingSlot = null },
             onSave = { updatedSlot ->
                 scope.launch {
@@ -967,6 +972,7 @@ fun RoomFormDialog(
 // ----------------------------------------------------
 // TIMETABLE SLOT CARD COMPONENT (مرتب وواضح)
 // ----------------------------------------------------
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TimetableSlotCard(
     slot: TimetableSlot,
@@ -1028,12 +1034,19 @@ fun TimetableSlotCard(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Details Row: Teacher • Room • Group
-            Row(
+            // Details Row: Level • Teacher • Room • Group
+            FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+                verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
+                if (slot.level.isNotBlank()) {
+                    StatusBadge(
+                        text = "🎓 ${slot.level}",
+                        color = SchoolSecondary
+                    )
+                }
+
                 if (slot.teacherName.isNotBlank()) {
                     StatusBadge(
                         text = "👨‍🏫 ${slot.teacherName}",
@@ -1060,8 +1073,9 @@ fun TimetableSlotCard(
 }
 
 // ----------------------------------------------------
-// CREATE TIMETABLE SLOT DIALOG (تصميم مرتب ومنظم ومريح وواضح جداً)
+// CREATE TIMETABLE SLOT DIALOG (اختيار المواد والمستويات المسجلة والربط التلقائي)
 // ----------------------------------------------------
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun CreateSlotDialog(
     strings: AppStrings,
@@ -1078,13 +1092,49 @@ fun CreateSlotDialog(
     var startTime by remember { mutableStateOf("08:00") }
     var endTime by remember { mutableStateOf("10:00") }
 
-    var subjectText by remember { mutableStateOf(subjects.firstOrNull()?.name ?: "") }
-    var teacherText by remember { mutableStateOf(teachers.firstOrNull()?.fullName ?: "") }
-    var groupText by remember { mutableStateOf(groups.firstOrNull()?.name ?: "") }
-    var roomText by remember { mutableStateOf(rooms.firstOrNull()?.name ?: "") }
+    // Collect all entered educational levels from subjects and groups
+    val enteredLevels = remember(subjects, groups) {
+        val lvls = (subjects.map { it.level } + groups.map { it.level }).filter { it.isNotBlank() }.distinct()
+        if (lvls.isNotEmpty()) lvls else listOf("الابتدائي", "الأولى إعدادي", "الثانية إعدادي", "الثالثة إعدادي", "الجذع المشترك", "الأولى باكالوريا", "الثانية باكالوريا")
+    }
+
+    var selectedLevelFilter by remember { mutableStateOf("الكل") }
+
+    var selectedSubjectObj by remember { mutableStateOf(subjects.firstOrNull()) }
+    var subjectText by remember { mutableStateOf(selectedSubjectObj?.name ?: "") }
+    var levelText by remember { mutableStateOf(selectedSubjectObj?.level ?: "") }
+
+    var selectedGroupObj by remember { mutableStateOf(groups.firstOrNull()) }
+    var groupText by remember { mutableStateOf(selectedGroupObj?.name ?: "") }
+
+    var selectedTeacherObj by remember {
+        mutableStateOf(
+            selectedSubjectObj?.teacherId?.let { tId -> teachers.firstOrNull { it.id == tId } }
+                ?: teachers.firstOrNull()
+        )
+    }
+    var teacherText by remember { mutableStateOf(selectedTeacherObj?.fullName ?: "") }
 
     var selectedRoomObj by remember { mutableStateOf(rooms.firstOrNull()) }
-    var selectedTeacherObj by remember { mutableStateOf(teachers.firstOrNull()) }
+    var roomText by remember { mutableStateOf(selectedRoomObj?.name ?: "") }
+
+    // Filtered subjects based on selected level
+    val filteredSubjects = remember(subjects, selectedLevelFilter) {
+        if (selectedLevelFilter == "الكل" || selectedLevelFilter.isBlank()) {
+            subjects
+        } else {
+            subjects.filter { it.level.equals(selectedLevelFilter, ignoreCase = true) }
+        }
+    }
+
+    // Filtered groups based on selected level
+    val filteredGroups = remember(groups, selectedLevelFilter) {
+        if (selectedLevelFilter == "الكل" || selectedLevelFilter.isBlank()) {
+            groups
+        } else {
+            groups.filter { it.level.isBlank() || it.level.equals(selectedLevelFilter, ignoreCase = true) }
+        }
+    }
 
     val quickTimePresets = listOf(
         "08:00" to "10:00",
@@ -1134,7 +1184,7 @@ fun CreateSlotDialog(
         Surface(
             modifier = Modifier
                 .fillMaxWidth(0.95f)
-                .fillMaxHeight(0.90f)
+                .fillMaxHeight(0.92f)
                 .padding(vertical = 12.dp),
             shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surface,
@@ -1175,7 +1225,7 @@ fun CreateSlotDialog(
                                 color = SchoolPrimary
                             )
                             Text(
-                                text = "تنظيم الحصة وتعيين التوقيت والمادة والقاعة",
+                                text = "تحديد المادة والمستوى والتوقيت والقاعة",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -1326,7 +1376,7 @@ fun CreateSlotDialog(
                         }
                     }
 
-                    // SECTION 2: 📚 Subject & Group (المادة والفوج)
+                    // SECTION 2: 🎓 Educational Level & Subject (المستوى والمادة المسجلة)
                     Card(
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
@@ -1340,31 +1390,97 @@ fun CreateSlotDialog(
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Book, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.School, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "2. المادة التعليمية والفوج",
+                                    text = "2. اختيار المستوى الدراسي والمادة",
                                     fontWeight = FontWeight.Bold,
                                     style = MaterialTheme.typography.titleSmall
                                 )
                             }
 
-                            // Subject Quick Chips if available
-                            if (subjects.isNotEmpty()) {
-                                Text(
-                                    text = "المواد المسجلة في المدرسة:",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Row(
+                            // 1. Level Filter Chips (المستويات المسجلة)
+                            Text(
+                                text = "المستوى الدراسي المسجل:",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = SchoolPrimary
+                            )
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                val allLevelOptions = listOf("الكل") + enteredLevels
+                                allLevelOptions.forEach { lvl ->
+                                    val isSelected = selectedLevelFilter.equals(lvl, ignoreCase = true)
+                                    FilterChip(
+                                        selected = isSelected,
+                                        onClick = {
+                                            selectedLevelFilter = lvl
+                                            if (lvl != "الكل") {
+                                                levelText = lvl
+                                            }
+                                        },
+                                        label = { Text(lvl, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) }
+                                    )
+                                }
+                            }
+
+                            OutlinedTextField(
+                                value = levelText,
+                                onValueChange = {
+                                    levelText = it
+                                },
+                                label = { Text("المستوى الدراسي (أو اكتب مخصص)") },
+                                placeholder = { Text("مثال: الأولى باكالوريا، الثالثة إعدادي") },
+                                leadingIcon = { Icon(Icons.Default.School, contentDescription = null, tint = Color(0xFFD97706)) },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                            // 2. Subject Choices (المواد المسجلة في هذا المستوى)
+                            Text(
+                                text = "المواد المسجلة المتاحة ${if (selectedLevelFilter != "الكل") "($selectedLevelFilter)" else ""}:",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = SchoolPrimary
+                            )
+
+                            if (filteredSubjects.isNotEmpty()) {
+                                FlowRow(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    subjects.take(4).forEach { sb ->
+                                    filteredSubjects.forEach { sb ->
+                                        val isSelected = selectedSubjectObj?.id == sb.id || (subjectText.equals(sb.name, ignoreCase = true) && (levelText.isBlank() || sb.level.equals(levelText, ignoreCase = true)))
                                         FilterChip(
-                                            selected = subjectText.equals(sb.name, ignoreCase = true),
-                                            onClick = { subjectText = sb.name },
-                                            label = { Text(sb.name, fontSize = 11.sp) }
+                                            selected = isSelected,
+                                            onClick = {
+                                                selectedSubjectObj = sb
+                                                subjectText = sb.name
+                                                levelText = sb.level
+                                                if (sb.level.isNotBlank() && selectedLevelFilter == "الكل") {
+                                                    selectedLevelFilter = sb.level
+                                                }
+                                                if (sb.teacherId.isNotBlank()) {
+                                                    val matchedTeacher = teachers.firstOrNull { it.id == sb.teacherId || it.fullName.equals(sb.teacherName, ignoreCase = true) }
+                                                    if (matchedTeacher != null) {
+                                                        selectedTeacherObj = matchedTeacher
+                                                        teacherText = matchedTeacher.fullName
+                                                    } else if (sb.teacherName.isNotBlank()) {
+                                                        teacherText = sb.teacherName
+                                                    }
+                                                }
+                                            },
+                                            label = {
+                                                val labelText = if (selectedLevelFilter == "الكل" && sb.level.isNotBlank()) "${sb.name} (${sb.level})" else sb.name
+                                                Text(labelText, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal)
+                                            }
                                         )
                                     }
                                 }
@@ -1372,7 +1488,10 @@ fun CreateSlotDialog(
 
                             OutlinedTextField(
                                 value = subjectText,
-                                onValueChange = { subjectText = it },
+                                onValueChange = {
+                                    subjectText = it
+                                    selectedSubjectObj = subjects.firstOrNull { s -> s.name.equals(it.trim(), ignoreCase = true) && (levelText.isBlank() || s.level.equals(levelText.trim(), ignoreCase = true)) }
+                                },
                                 label = { Text(strings.subjectName + " *") },
                                 placeholder = { Text("اختر أو اكتب اسم المادة (مثال: رياضيات، فيزياء)") },
                                 leadingIcon = { Icon(Icons.Default.MenuBook, contentDescription = null, tint = Color(0xFFD97706)) },
@@ -1382,23 +1501,53 @@ fun CreateSlotDialog(
                                     .fillMaxWidth()
                                     .testTag("input_slot_subject")
                             )
+                        }
+                    }
+
+                    // SECTION 3: 👥 Group (الفوج / القسم)
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Groups, contentDescription = null, tint = SchoolPrimary, modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "3. الفوج والقسم",
+                                    fontWeight = FontWeight.Bold,
+                                    style = MaterialTheme.typography.titleSmall
+                                )
+                            }
 
                             // Group Quick Chips if available
-                            if (groups.isNotEmpty()) {
+                            if (filteredGroups.isNotEmpty()) {
                                 Text(
-                                    text = "الأفواج والأقسام المسجلة:",
+                                    text = "الأفواج المسجلة:",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                Row(
+                                FlowRow(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    groups.take(4).forEach { gr ->
+                                    filteredGroups.forEach { gr ->
+                                        val isSelected = selectedGroupObj?.id == gr.id || groupText.equals(gr.name, ignoreCase = true)
                                         FilterChip(
-                                            selected = groupText.equals(gr.name, ignoreCase = true),
-                                            onClick = { groupText = gr.name },
-                                            label = { Text(gr.name, fontSize = 11.sp) }
+                                            selected = isSelected,
+                                            onClick = {
+                                                selectedGroupObj = gr
+                                                groupText = gr.name
+                                            },
+                                            label = { Text(gr.name, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) }
                                         )
                                     }
                                 }
@@ -1406,7 +1555,10 @@ fun CreateSlotDialog(
 
                             OutlinedTextField(
                                 value = groupText,
-                                onValueChange = { groupText = it },
+                                onValueChange = {
+                                    groupText = it
+                                    selectedGroupObj = groups.firstOrNull { g -> g.name.equals(it.trim(), ignoreCase = true) }
+                                },
                                 label = { Text(strings.groupsTitle) },
                                 placeholder = { Text("اختر أو اكتب الفوج (مثال: الفوج 1، السنة أولى)") },
                                 leadingIcon = { Icon(Icons.Default.Groups, contentDescription = null, tint = SchoolPrimary) },
@@ -1417,7 +1569,7 @@ fun CreateSlotDialog(
                         }
                     }
 
-                    // SECTION 3: 👨‍🏫 Teacher Assignment (الأستاذ المسؤول)
+                    // SECTION 4: 👨‍🏫 Teacher Assignment (الأستاذ المسؤول)
                     Card(
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
@@ -1434,7 +1586,7 @@ fun CreateSlotDialog(
                                 Icon(Icons.Default.Person, contentDescription = null, tint = Color(0xFF2563EB), modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "3. الأستاذ المشرف على الحصة",
+                                    text = "4. الأستاذ المشرف على الحصة",
                                     fontWeight = FontWeight.Bold,
                                     style = MaterialTheme.typography.titleSmall
                                 )
@@ -1447,18 +1599,20 @@ fun CreateSlotDialog(
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                Row(
+                                FlowRow(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    teachers.take(4).forEach { tc ->
+                                    teachers.forEach { tc ->
+                                        val isSelected = selectedTeacherObj?.id == tc.id || teacherText.equals(tc.fullName, ignoreCase = true)
                                         FilterChip(
-                                            selected = teacherText.equals(tc.fullName, ignoreCase = true),
+                                            selected = isSelected,
                                             onClick = {
                                                 teacherText = tc.fullName
                                                 selectedTeacherObj = tc
                                             },
-                                            label = { Text("👨‍🏫 ${tc.fullName}", fontSize = 11.sp) }
+                                            label = { Text("👨‍🏫 ${tc.fullName}", fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) }
                                         )
                                     }
                                 }
@@ -1466,7 +1620,10 @@ fun CreateSlotDialog(
 
                             OutlinedTextField(
                                 value = teacherText,
-                                onValueChange = { teacherText = it },
+                                onValueChange = {
+                                    teacherText = it
+                                    selectedTeacherObj = teachers.firstOrNull { t -> t.fullName.equals(it.trim(), ignoreCase = true) }
+                                },
                                 label = { Text(strings.teacherName) },
                                 placeholder = { Text("اختر أو اكتب اسم الأستاذ المسؤول") },
                                 leadingIcon = { Icon(Icons.Default.School, contentDescription = null, tint = Color(0xFF2563EB)) },
@@ -1477,7 +1634,7 @@ fun CreateSlotDialog(
                         }
                     }
 
-                    // SECTION 4: 🚪 Room & Seating (حجز القاعة الدراسية)
+                    // SECTION 5: 🚪 Room & Seating (حجز القاعة الدراسية)
                     Card(
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
@@ -1494,7 +1651,7 @@ fun CreateSlotDialog(
                                 Icon(Icons.Default.MeetingRoom, contentDescription = null, tint = Color(0xFF16A34A), modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
-                                    text = "4. القاعة الدراسية والمكان",
+                                    text = "5. القاعة الدراسية والمكان",
                                     fontWeight = FontWeight.Bold,
                                     style = MaterialTheme.typography.titleSmall
                                 )
@@ -1507,18 +1664,20 @@ fun CreateSlotDialog(
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                Row(
+                                FlowRow(
                                     modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    rooms.take(4).forEach { rm ->
+                                    rooms.forEach { rm ->
+                                        val isSelected = selectedRoomObj?.id == rm.id || roomText.equals(rm.name, ignoreCase = true)
                                         FilterChip(
-                                            selected = roomText.equals(rm.name, ignoreCase = true),
+                                            selected = isSelected,
                                             onClick = {
                                                 roomText = rm.name
                                                 selectedRoomObj = rm
                                             },
-                                            label = { Text("🚪 ${rm.name} (${rm.capacity} مقعد)", fontSize = 11.sp) }
+                                            label = { Text("🚪 ${rm.name} (${rm.capacity} مقعد)", fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) }
                                         )
                                     }
                                 }
@@ -1526,7 +1685,10 @@ fun CreateSlotDialog(
 
                             OutlinedTextField(
                                 value = roomText,
-                                onValueChange = { roomText = it },
+                                onValueChange = {
+                                    roomText = it
+                                    selectedRoomObj = rooms.firstOrNull { r -> r.name.equals(it.trim(), ignoreCase = true) }
+                                },
                                 label = { Text(strings.roomName) },
                                 placeholder = { Text("اختر أو اكتب القاعة (مثال: قاعة 1، مختبر)") },
                                 leadingIcon = { Icon(Icons.Default.DoorSliding, contentDescription = null, tint = Color(0xFF16A34A)) },
@@ -1558,16 +1720,36 @@ fun CreateSlotDialog(
                     Button(
                         onClick = {
                             if (subjectText.isNotBlank()) {
+                                val resolvedSubjId = selectedSubjectObj?.id
+                                    ?: subjects.firstOrNull { it.name.equals(subjectText.trim(), ignoreCase = true) && (levelText.isBlank() || it.level.equals(levelText.trim(), ignoreCase = true)) }?.id
+                                    ?: subjects.firstOrNull { it.name.equals(subjectText.trim(), ignoreCase = true) }?.id
+                                    ?: ""
+
+                                val resolvedGroupId = selectedGroupObj?.id
+                                    ?: groups.firstOrNull { it.name.equals(groupText.trim(), ignoreCase = true) }?.id
+                                    ?: ""
+
+                                val resolvedTeacherId = selectedTeacherObj?.id
+                                    ?: teachers.firstOrNull { it.fullName.equals(teacherText.trim(), ignoreCase = true) }?.id
+                                    ?: ""
+
+                                val resolvedRoomId = selectedRoomObj?.id
+                                    ?: rooms.firstOrNull { it.name.equals(roomText.trim(), ignoreCase = true) }?.id
+                                    ?: ""
+
                                 onCreate(
                                     TimetableSlot(
                                         dayOfWeek = dayOfWeek,
                                         startTime = startTime.trim(),
                                         endTime = endTime.trim(),
+                                        subjectId = resolvedSubjId,
                                         subjectName = subjectText.trim(),
+                                        level = levelText.trim(),
                                         teacherName = teacherText.trim(),
-                                        teacherId = selectedTeacherObj?.id ?: "",
+                                        teacherId = resolvedTeacherId,
                                         roomName = roomText.trim(),
-                                        roomId = selectedRoomObj?.id ?: "",
+                                        roomId = resolvedRoomId,
+                                        groupId = resolvedGroupId,
                                         groupName = groupText.trim()
                                     )
                                 )
@@ -1592,21 +1774,70 @@ fun CreateSlotDialog(
 }
 
 // ----------------------------------------------------
-// EDIT TIMETABLE SLOT DIALOG (تصميم مرتب ومنظم ومريح وواضح)
+// EDIT TIMETABLE SLOT DIALOG (تعديل كامل مع اختيار المواد والمستويات)
 // ----------------------------------------------------
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun EditSlotDialog(
     slot: TimetableSlot,
     strings: AppStrings,
+    groups: List<SchoolGroup>,
+    subjects: List<Subject>,
+    rooms: List<Room>,
+    teachers: List<SchoolUser>,
+    existingSlots: List<TimetableSlot>,
     onDismiss: () -> Unit,
     onSave: (TimetableSlot) -> Unit
 ) {
-    var subjectName by remember { mutableStateOf(slot.subjectName) }
-    var teacherName by remember { mutableStateOf(slot.teacherName) }
-    var roomName by remember { mutableStateOf(slot.roomName) }
-    var groupName by remember { mutableStateOf(slot.groupName) }
+    var dayOfWeek by remember { mutableStateOf(slot.dayOfWeek) }
     var startTime by remember { mutableStateOf(slot.startTime) }
     var endTime by remember { mutableStateOf(slot.endTime) }
+
+    val enteredLevels = remember(subjects, groups) {
+        val lvls = (subjects.map { it.level } + groups.map { it.level }).filter { it.isNotBlank() }.distinct()
+        if (lvls.isNotEmpty()) lvls else listOf("الابتدائي", "الأولى إعدادي", "الثانية إعدادي", "الثالثة إعدادي", "الجذع المشترك", "الأولى باكالوريا", "الثانية باكالوريا")
+    }
+
+    var selectedLevelFilter by remember {
+        mutableStateOf(if (slot.level.isNotBlank()) slot.level else "الكل")
+    }
+
+    var selectedSubjectObj by remember {
+        mutableStateOf(subjects.firstOrNull { it.id == slot.subjectId || (it.name == slot.subjectName && it.level == slot.level) })
+    }
+    var subjectText by remember { mutableStateOf(slot.subjectName) }
+    var levelText by remember { mutableStateOf(slot.level) }
+
+    var selectedGroupObj by remember {
+        mutableStateOf(groups.firstOrNull { it.id == slot.groupId || it.name == slot.groupName })
+    }
+    var groupText by remember { mutableStateOf(slot.groupName) }
+
+    var selectedTeacherObj by remember {
+        mutableStateOf(teachers.firstOrNull { it.id == slot.teacherId || it.fullName == slot.teacherName })
+    }
+    var teacherText by remember { mutableStateOf(slot.teacherName) }
+
+    var selectedRoomObj by remember {
+        mutableStateOf(rooms.firstOrNull { it.id == slot.roomId || it.name == slot.roomName })
+    }
+    var roomText by remember { mutableStateOf(slot.roomName) }
+
+    val filteredSubjects = remember(subjects, selectedLevelFilter) {
+        if (selectedLevelFilter == "الكل" || selectedLevelFilter.isBlank()) {
+            subjects
+        } else {
+            subjects.filter { it.level.equals(selectedLevelFilter, ignoreCase = true) }
+        }
+    }
+
+    val filteredGroups = remember(groups, selectedLevelFilter) {
+        if (selectedLevelFilter == "الكل" || selectedLevelFilter.isBlank()) {
+            groups
+        } else {
+            groups.filter { it.level.isBlank() || it.level.equals(selectedLevelFilter, ignoreCase = true) }
+        }
+    }
 
     val quickTimePresets = listOf(
         "08:00" to "10:00",
@@ -1616,6 +1847,16 @@ fun EditSlotDialog(
         "18:00" to "20:00"
     )
 
+    val daysList = listOf(
+        1 to strings.monday,
+        2 to strings.tuesday,
+        3 to strings.wednesday,
+        4 to strings.thursday,
+        5 to strings.friday,
+        6 to strings.saturday,
+        7 to strings.sunday
+    )
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -1623,7 +1864,7 @@ fun EditSlotDialog(
         Surface(
             modifier = Modifier
                 .fillMaxWidth(0.95f)
-                .fillMaxHeight(0.88f)
+                .fillMaxHeight(0.92f)
                 .padding(vertical = 12.dp),
             shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surface,
@@ -1659,7 +1900,7 @@ fun EditSlotDialog(
                                 color = SchoolPrimary
                             )
                             Text(
-                                text = "تعديل تفاصيل وتوقيت الحصة الدراسية",
+                                text = "تعديل تفاصيل المادة والمستوى وتوقيت الحصة",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -1681,7 +1922,7 @@ fun EditSlotDialog(
                         .verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    // Time Section
+                    // SECTION 1: Time
                     Card(
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
@@ -1695,9 +1936,34 @@ fun EditSlotDialog(
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.AccessTime, contentDescription = null, tint = SchoolPrimary, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.CalendarMonth, contentDescription = null, tint = SchoolPrimary, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("توقيت الحصة", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                                Text("1. اليوم والتوقيت", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                daysList.take(4).forEach { (dNum, dName) ->
+                                    FilterChip(
+                                        selected = dayOfWeek == dNum,
+                                        onClick = { dayOfWeek = dNum },
+                                        label = { Text(dName, fontSize = 11.sp, fontWeight = if (dayOfWeek == dNum) FontWeight.Bold else FontWeight.Normal) }
+                                    )
+                                }
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                daysList.drop(4).forEach { (dNum, dName) ->
+                                    FilterChip(
+                                        selected = dayOfWeek == dNum,
+                                        onClick = { dayOfWeek = dNum },
+                                        label = { Text(dName, fontSize = 11.sp, fontWeight = if (dayOfWeek == dNum) FontWeight.Bold else FontWeight.Normal) }
+                                    )
+                                }
                             }
 
                             Row(
@@ -1740,7 +2006,7 @@ fun EditSlotDialog(
                         }
                     }
 
-                    // Details Section
+                    // SECTION 2: Level & Subject
                     Card(
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
@@ -1754,24 +2020,133 @@ fun EditSlotDialog(
                             verticalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(Icons.Default.Class, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.School, contentDescription = null, tint = Color(0xFFD97706), modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("بيانات المادة والأستاذ والقاعة", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                                Text("2. المستوى الدراسي والمادة", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                            }
+
+                            // Level Chips
+                            Text("المستوى الدراسي المسجل:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = SchoolPrimary)
+                            FlowRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                val allLevelOptions = listOf("الكل") + enteredLevels
+                                allLevelOptions.forEach { lvl ->
+                                    val isSelected = selectedLevelFilter.equals(lvl, ignoreCase = true)
+                                    FilterChip(
+                                        selected = isSelected,
+                                        onClick = {
+                                            selectedLevelFilter = lvl
+                                            if (lvl != "الكل") levelText = lvl
+                                        },
+                                        label = { Text(lvl, fontSize = 11.sp, fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal) }
+                                    )
+                                }
                             }
 
                             OutlinedTextField(
-                                value = subjectName,
-                                onValueChange = { subjectName = it },
+                                value = levelText,
+                                onValueChange = { levelText = it },
+                                label = { Text("المستوى الدراسي") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp), color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                            // Subject Chips
+                            Text("المواد المسجلة المتاحة:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = SchoolPrimary)
+                            if (filteredSubjects.isNotEmpty()) {
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    filteredSubjects.forEach { sb ->
+                                        val isSelected = selectedSubjectObj?.id == sb.id || (subjectText.equals(sb.name, ignoreCase = true) && (levelText.isBlank() || sb.level.equals(levelText, ignoreCase = true)))
+                                        FilterChip(
+                                            selected = isSelected,
+                                            onClick = {
+                                                selectedSubjectObj = sb
+                                                subjectText = sb.name
+                                                levelText = sb.level
+                                                if (sb.teacherId.isNotBlank()) {
+                                                    val matchedTeacher = teachers.firstOrNull { it.id == sb.teacherId || it.fullName.equals(sb.teacherName, ignoreCase = true) }
+                                                    if (matchedTeacher != null) {
+                                                        selectedTeacherObj = matchedTeacher
+                                                        teacherText = matchedTeacher.fullName
+                                                    }
+                                                }
+                                            },
+                                            label = { Text(if (selectedLevelFilter == "الكل" && sb.level.isNotBlank()) "${sb.name} (${sb.level})" else sb.name, fontSize = 11.sp) }
+                                        )
+                                    }
+                                }
+                            }
+
+                            OutlinedTextField(
+                                value = subjectText,
+                                onValueChange = {
+                                    subjectText = it
+                                    selectedSubjectObj = subjects.firstOrNull { s -> s.name.equals(it.trim(), ignoreCase = true) && (levelText.isBlank() || s.level.equals(levelText.trim(), ignoreCase = true)) }
+                                },
                                 label = { Text(strings.subjectName + " *") },
                                 leadingIcon = { Icon(Icons.Default.Book, contentDescription = null, tint = Color(0xFFD97706)) },
                                 singleLine = true,
                                 shape = RoundedCornerShape(12.dp),
                                 modifier = Modifier.fillMaxWidth()
                             )
+                        }
+                    }
+
+                    // SECTION 3: Group, Teacher, Room
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(14.dp),
+                            verticalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Class, contentDescription = null, tint = Color(0xFF2563EB), modifier = Modifier.size(18.dp))
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("3. الفوج والأستاذ والقاعة", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                            }
+
+                            if (filteredGroups.isNotEmpty()) {
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    filteredGroups.forEach { gr ->
+                                        val isSelected = selectedGroupObj?.id == gr.id || groupText.equals(gr.name, ignoreCase = true)
+                                        FilterChip(
+                                            selected = isSelected,
+                                            onClick = {
+                                                selectedGroupObj = gr
+                                                groupText = gr.name
+                                            },
+                                            label = { Text(gr.name, fontSize = 11.sp) }
+                                        )
+                                    }
+                                }
+                            }
 
                             OutlinedTextField(
-                                value = groupName,
-                                onValueChange = { groupName = it },
+                                value = groupText,
+                                onValueChange = {
+                                    groupText = it
+                                    selectedGroupObj = groups.firstOrNull { g -> g.name.equals(it.trim(), ignoreCase = true) }
+                                },
                                 label = { Text(strings.groupsTitle) },
                                 leadingIcon = { Icon(Icons.Default.Groups, contentDescription = null, tint = SchoolPrimary) },
                                 singleLine = true,
@@ -1779,9 +2154,32 @@ fun EditSlotDialog(
                                 modifier = Modifier.fillMaxWidth()
                             )
 
+                            if (teachers.isNotEmpty()) {
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    teachers.forEach { tc ->
+                                        val isSelected = selectedTeacherObj?.id == tc.id || teacherText.equals(tc.fullName, ignoreCase = true)
+                                        FilterChip(
+                                            selected = isSelected,
+                                            onClick = {
+                                                teacherText = tc.fullName
+                                                selectedTeacherObj = tc
+                                            },
+                                            label = { Text("👨‍🏫 ${tc.fullName}", fontSize = 11.sp) }
+                                        )
+                                    }
+                                }
+                            }
+
                             OutlinedTextField(
-                                value = teacherName,
-                                onValueChange = { teacherName = it },
+                                value = teacherText,
+                                onValueChange = {
+                                    teacherText = it
+                                    selectedTeacherObj = teachers.firstOrNull { t -> t.fullName.equals(it.trim(), ignoreCase = true) }
+                                },
                                 label = { Text(strings.teacherName) },
                                 leadingIcon = { Icon(Icons.Default.Person, contentDescription = null, tint = Color(0xFF2563EB)) },
                                 singleLine = true,
@@ -1789,9 +2187,32 @@ fun EditSlotDialog(
                                 modifier = Modifier.fillMaxWidth()
                             )
 
+                            if (rooms.isNotEmpty()) {
+                                FlowRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    rooms.forEach { rm ->
+                                        val isSelected = selectedRoomObj?.id == rm.id || roomText.equals(rm.name, ignoreCase = true)
+                                        FilterChip(
+                                            selected = isSelected,
+                                            onClick = {
+                                                roomText = rm.name
+                                                selectedRoomObj = rm
+                                            },
+                                            label = { Text("🚪 ${rm.name} (${rm.capacity})", fontSize = 11.sp) }
+                                        )
+                                    }
+                                }
+                            }
+
                             OutlinedTextField(
-                                value = roomName,
-                                onValueChange = { roomName = it },
+                                value = roomText,
+                                onValueChange = {
+                                    roomText = it
+                                    selectedRoomObj = rooms.firstOrNull { r -> r.name.equals(it.trim(), ignoreCase = true) }
+                                },
                                 label = { Text(strings.roomName) },
                                 leadingIcon = { Icon(Icons.Default.MeetingRoom, contentDescription = null, tint = Color(0xFF16A34A)) },
                                 singleLine = true,
@@ -1821,18 +2242,41 @@ fun EditSlotDialog(
 
                     Button(
                         onClick = {
+                            val resolvedSubjId = selectedSubjectObj?.id
+                                ?: subjects.firstOrNull { it.name.equals(subjectText.trim(), ignoreCase = true) && (levelText.isBlank() || it.level.equals(levelText.trim(), ignoreCase = true)) }?.id
+                                ?: subjects.firstOrNull { it.name.equals(subjectText.trim(), ignoreCase = true) }?.id
+                                ?: slot.subjectId
+
+                            val resolvedGroupId = selectedGroupObj?.id
+                                ?: groups.firstOrNull { it.name.equals(groupText.trim(), ignoreCase = true) }?.id
+                                ?: slot.groupId
+
+                            val resolvedTeacherId = selectedTeacherObj?.id
+                                ?: teachers.firstOrNull { it.fullName.equals(teacherText.trim(), ignoreCase = true) }?.id
+                                ?: slot.teacherId
+
+                            val resolvedRoomId = selectedRoomObj?.id
+                                ?: rooms.firstOrNull { it.name.equals(roomText.trim(), ignoreCase = true) }?.id
+                                ?: slot.roomId
+
                             onSave(
                                 slot.copy(
-                                    subjectName = subjectName.trim(),
-                                    teacherName = teacherName.trim(),
-                                    roomName = roomName.trim(),
-                                    groupName = groupName.trim(),
+                                    dayOfWeek = dayOfWeek,
                                     startTime = startTime.trim(),
-                                    endTime = endTime.trim()
+                                    endTime = endTime.trim(),
+                                    subjectId = resolvedSubjId,
+                                    subjectName = subjectText.trim(),
+                                    level = levelText.trim(),
+                                    teacherId = resolvedTeacherId,
+                                    teacherName = teacherText.trim(),
+                                    groupId = resolvedGroupId,
+                                    groupName = groupText.trim(),
+                                    roomId = resolvedRoomId,
+                                    roomName = roomText.trim()
                                 )
                             )
                         },
-                        enabled = subjectName.isNotBlank(),
+                        enabled = subjectText.isNotBlank(),
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = SchoolPrimary),
                         modifier = Modifier

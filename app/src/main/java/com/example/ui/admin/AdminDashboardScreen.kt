@@ -52,8 +52,8 @@ fun AdminDashboardScreen(
     val grades by firebaseManager.observeGrades().collectAsState(initial = emptyList())
     val payments by firebaseManager.observePayments().collectAsState(initial = emptyList())
 
-    val totalStudents = users.count { it.role == Role.STUDENT }
-    val totalTeachers = users.count { it.role == Role.TEACHER }
+    val totalStudents = remember(users) { users.count { it.role == Role.STUDENT } }
+    val totalTeachers = remember(users) { users.count { it.role == Role.TEACHER } }
 
     // Attendance calculation
     val attendanceRate = remember(attendanceRecords) {

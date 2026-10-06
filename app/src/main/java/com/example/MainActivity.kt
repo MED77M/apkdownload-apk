@@ -161,7 +161,7 @@ class MainActivity : ComponentActivity() {
             }
 
             // Start Realtime Notification Observer and Background Service when user is logged in
-            LaunchedEffect(currentUser) {
+            LaunchedEffect(currentUser?.id) {
                 currentUser?.let { user ->
                     RealtimeNotificationObserver.start(context.applicationContext, user)
                     SchoolBackgroundNotificationService.startService(context.applicationContext)

@@ -1383,6 +1383,7 @@ class FirebaseManager private constructor(private val context: Context) {
                         id = it.id,
                         subjectId = it.getString("subjectId") ?: "",
                         subjectName = it.getString("subjectName") ?: "",
+                        level = it.getString("level") ?: "",
                         teacherId = it.getString("teacherId") ?: "",
                         teacherName = it.getString("teacherName") ?: "",
                         groupId = it.getString("groupId") ?: "",

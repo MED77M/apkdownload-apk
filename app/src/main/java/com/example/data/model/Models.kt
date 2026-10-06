@@ -165,6 +165,7 @@ data class TimetableSlot(
     val id: String = "",
     val subjectId: String = "",
     val subjectName: String = "",
+    val level: String = "",
     val teacherId: String = "",
     val teacherName: String = "",
     val groupId: String = "",
@@ -178,6 +179,7 @@ data class TimetableSlot(
     fun toMap(): Map<String, Any> = mapOf(
         "subjectId" to subjectId,
         "subjectName" to subjectName,
+        "level" to level,
         "teacherId" to teacherId,
         "teacherName" to teacherName,
         "groupId" to groupId,
