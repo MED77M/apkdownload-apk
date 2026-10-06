@@ -40,7 +40,8 @@ fun StudentHomeworkScreen(
     val strings = Translations.get(currentLanguage)
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val currentStudent = firebaseManager.currentUser
+    val liveStudent by firebaseManager.observeUser(firebaseManager.currentUser?.id ?: "").collectAsState(initial = firebaseManager.currentUser)
+    val currentStudent = liveStudent ?: firebaseManager.currentUser
 
     val homeworkList by firebaseManager.observeHomework().collectAsState(initial = emptyList())
     val mySubmissions by firebaseManager.observeSubmissions().collectAsState(initial = emptyList())

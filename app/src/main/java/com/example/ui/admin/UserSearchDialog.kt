@@ -83,6 +83,7 @@ fun UserSearchDialog(
         Surface(
             modifier = Modifier
                 .fillMaxWidth(0.95f)
+                .widthIn(max = 680.dp)
                 .fillMaxHeight(0.88f),
             shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surface,

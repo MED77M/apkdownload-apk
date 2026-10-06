@@ -259,6 +259,40 @@ fun ChatConversationScreen(
         }
     }
 
+    var showDeleteConvDialog by remember { mutableStateOf(false) }
+
+    if (showDeleteConvDialog && currentUser.role == Role.ADMIN) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConvDialog = false },
+            title = { Text("حذف المحادثة نهائياً", fontWeight = FontWeight.Bold) },
+            text = { Text("هل أنت متأكد من حذف هذه المحادثة بالكامل وجميع رسائلها؟ لا يمكن التراجع عن هذا الإجراء.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDeleteConvDialog = false
+                        scope.launch {
+                            val res = firebaseManager.deleteConversation(conversationId)
+                            if (res.isSuccess) {
+                                Toast.makeText(context, "تم حذف المحادثة بنجاح", Toast.LENGTH_SHORT).show()
+                                onBack()
+                            } else {
+                                Toast.makeText(context, "${strings.error}: ${res.exceptionOrNull()?.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text(strings.delete, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConvDialog = false }) {
+                    Text(strings.cancel)
+                }
+            }
+        )
+    }
+
     Scaffold(
         topBar = {
             AppHeader(
@@ -269,6 +303,16 @@ fun ChatConversationScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack, modifier = Modifier.size(48.dp)) {
                         Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
+                    }
+                },
+                actions = {
+                    if (currentUser.role == Role.ADMIN) {
+                        IconButton(
+                            onClick = { showDeleteConvDialog = true },
+                            modifier = Modifier.size(48.dp)
+                        ) {
+                            Icon(Icons.Default.DeleteOutline, contentDescription = "حذف المحادثة", tint = Color.White)
+                        }
                     }
                 }
             )

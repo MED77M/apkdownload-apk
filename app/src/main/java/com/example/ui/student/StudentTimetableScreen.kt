@@ -30,8 +30,22 @@ fun StudentTimetableScreen(
     onBack: () -> Unit
 ) {
     val strings = Translations.get(currentLanguage)
-    val currentStudent = firebaseManager.currentUser
-    val slots by firebaseManager.observeTimetable(groupId = currentStudent?.groupIds?.firstOrNull()).collectAsState(initial = emptyList())
+    val liveStudent by firebaseManager.observeUser(firebaseManager.currentUser?.id ?: "").collectAsState(initial = firebaseManager.currentUser)
+    val currentStudent = liveStudent ?: firebaseManager.currentUser
+    val allSlots by firebaseManager.observeTimetable().collectAsState(initial = emptyList())
+
+    val studentSubjectIds = currentStudent?.subjectIds ?: emptyList()
+    val studentGroupIds = currentStudent?.groupIds ?: emptyList()
+    val slots = remember(allSlots, studentSubjectIds, studentGroupIds) {
+        if (studentGroupIds.isEmpty() && studentSubjectIds.isEmpty()) {
+            allSlots
+        } else {
+            allSlots.filter { slot ->
+                (studentGroupIds.isNotEmpty() && studentGroupIds.contains(slot.groupId)) ||
+                (studentSubjectIds.isNotEmpty() && studentSubjectIds.contains(slot.subjectId))
+            }
+        }
+    }
 
     var selectedDay by remember { mutableStateOf(1) } // 1: Mon .. 7: Sun
 

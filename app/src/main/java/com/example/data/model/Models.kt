@@ -109,12 +109,45 @@ data class SchoolGroup(
 data class Subject(
     val id: String = "",
     val name: String = "",
-    val code: String = ""
+    val code: String = "",
+    val level: String = "",
+    val price: Double = 0.0,
+    val teacherId: String = "",
+    val teacherName: String = ""
 ) {
+    val displayName: String
+        get() = if (level.isNotBlank()) "$name - $level" else name
+
+    val fullLabelWithPrice: String
+        get() = buildString {
+            append(name)
+            if (level.isNotBlank()) append(" ($level)")
+            if (price > 0) append(" • ${price.toInt()} DH")
+            if (teacherName.isNotBlank()) append(" • $teacherName")
+        }
+
     fun toMap(): Map<String, Any> = mapOf(
         "name" to name,
-        "code" to code
+        "code" to code,
+        "level" to level,
+        "price" to price,
+        "teacherId" to teacherId,
+        "teacherName" to teacherName
     )
+
+    companion object {
+        fun fromMap(id: String, map: Map<String, Any?>): Subject {
+            return Subject(
+                id = id,
+                name = map["name"] as? String ?: "",
+                code = map["code"] as? String ?: "",
+                level = map["level"] as? String ?: "",
+                price = (map["price"] as? Number)?.toDouble() ?: 0.0,
+                teacherId = map["teacherId"] as? String ?: "",
+                teacherName = map["teacherName"] as? String ?: ""
+            )
+        }
+    }
 }
 
 data class Room(

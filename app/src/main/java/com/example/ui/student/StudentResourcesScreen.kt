@@ -36,7 +36,8 @@ fun StudentResourcesScreen(
     val strings = Translations.get(currentLanguage)
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val currentStudent = firebaseManager.currentUser
+    val liveStudent by firebaseManager.observeUser(firebaseManager.currentUser?.id ?: "").collectAsState(initial = firebaseManager.currentUser)
+    val currentStudent = liveStudent ?: firebaseManager.currentUser
 
     val resources by firebaseManager.observeResources(groupId = currentStudent?.groupIds?.firstOrNull()).collectAsState(initial = emptyList())
     var selectedType by remember { mutableStateOf("ALL") }

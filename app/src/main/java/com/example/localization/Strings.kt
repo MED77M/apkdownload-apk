@@ -360,6 +360,34 @@ interface AppStrings {
     val quickTimeSlots: String
     val sessionDetails: String
 
+    val selectSubject: String
+    val teacherSubject: String
+    val studentSubjects: String
+    val orAddNewSubject: String
+    val addSubjectPrompt: String
+    val subjectCreatedDirectly: String
+    val addAnotherSubject: String
+    val noSubjectsAvailable: String
+    val newSubjectNameInput: String
+    val assignSubjectToTeacher: String
+    val removeSubject: String
+    val teacherSubjectsPrompt: String
+    val addAnotherSubjectForTeacher: String
+
+    val subjectsPricingTitle: String
+    val addSubjectLevel: String
+    val subjectLevel: String
+    val subjectPrice: String
+    val assignedTeacher: String
+    val selectTeacher: String
+    val noTeacherAssigned: String
+    val applyTeacherToAllLevels: String
+    val editSubject: String
+    val deleteSubjectConfirm: String
+    val commonLevels: String
+    val commonSubjects: String
+    val perMonth: String
+
 }
 
 class ArabicStrings : AppStrings {
@@ -705,6 +733,34 @@ class ArabicStrings : AppStrings {
     override val noRoomsYet: String = "لا توجد قاعات مضافة بعد. أضف قاعة لتنظيم الجداول والحصص."
     override val quickTimeSlots: String = "توقيتات سريعة شائعة"
     override val sessionDetails: String = "تفاصيل الحصة"
+
+    override val selectSubject: String = "اختر المادة"
+    override val teacherSubject: String = "المادة التي يدرسها الأستاذ"
+    override val studentSubjects: String = "المواد المسجل بها التلميذ"
+    override val orAddNewSubject: String = "أو كتابة مادة جديدة لإضافتها مباشرة"
+    override val addSubjectPrompt: String = "اكتب اسم المادة ليتم إضافتها تلقائياً للنظام"
+    override val subjectCreatedDirectly: String = "تمت إضافة المادة إلى البرنامج مباشرة"
+    override val addAnotherSubject: String = "إضافة مادة أخرى للتلميذ"
+    override val noSubjectsAvailable: String = "لا توجد مواد مسجلة حالياً، يمكنك كتابة مادة جديدة أدناه"
+    override val newSubjectNameInput: String = "اسم المادة الجديدة"
+    override val assignSubjectToTeacher: String = "تعيين المادة للأستاذ"
+    override val removeSubject: String = "إزالة المادة"
+    override val teacherSubjectsPrompt: String = "المواد التي يدرسها الأستاذ (يمكن اختيار أكثر من مادة)"
+    override val addAnotherSubjectForTeacher: String = "إسناد مادة أخرى للأستاذ"
+
+    override val subjectsPricingTitle: String = "المواد والتسعيرات والمستويات"
+    override val addSubjectLevel: String = "إضافة مادة ومستوى"
+    override val subjectLevel: String = "المستوى الدراسي"
+    override val subjectPrice: String = "واجب المادة (درهم)"
+    override val assignedTeacher: String = "الأستاذ المسند"
+    override val selectTeacher: String = "اختر الأستاذ"
+    override val noTeacherAssigned: String = "لم يتم تعيين أستاذ بعد"
+    override val applyTeacherToAllLevels: String = "تعيين هذا الأستاذ لجميع مستويات هذه المادة"
+    override val editSubject: String = "تعديل المادة والتسعيرة"
+    override val deleteSubjectConfirm: String = "هل أنت متأكد من حذف هذه المادة؟"
+    override val commonLevels: String = "المستويات الشائعة"
+    override val commonSubjects: String = "المواد الشائعة"
+    override val perMonth: String = "شهرياً"
 }
 
 class EnglishStrings : AppStrings {
@@ -1050,6 +1106,34 @@ class EnglishStrings : AppStrings {
     override val noRoomsYet: String = "No rooms added yet. Add rooms to organize classes and schedule."
     override val quickTimeSlots: String = "Common Quick Time Slots"
     override val sessionDetails: String = "Session Details"
+
+    override val selectSubject: String = "Select Subject"
+    override val teacherSubject: String = "Subject Taught by Teacher"
+    override val studentSubjects: String = "Student's Enrolled Subjects"
+    override val orAddNewSubject: String = "Or write a new subject to add directly"
+    override val addSubjectPrompt: String = "Type subject name to add it automatically"
+    override val subjectCreatedDirectly: String = "Subject added to the system directly"
+    override val addAnotherSubject: String = "Add another subject for student"
+    override val noSubjectsAvailable: String = "No subjects available yet, type a new subject below"
+    override val newSubjectNameInput: String = "New Subject Name"
+    override val assignSubjectToTeacher: String = "Assign Subject to Teacher"
+    override val removeSubject: String = "Remove Subject"
+    override val teacherSubjectsPrompt: String = "Subjects Taught by Teacher (select one or more)"
+    override val addAnotherSubjectForTeacher: String = "Assign another subject to teacher"
+
+    override val subjectsPricingTitle: String = "Subjects, Levels & Pricing"
+    override val addSubjectLevel: String = "Add Subject & Level"
+    override val subjectLevel: String = "Academic Level"
+    override val subjectPrice: String = "Monthly Fee (DH)"
+    override val assignedTeacher: String = "Assigned Teacher"
+    override val selectTeacher: String = "Select Teacher"
+    override val noTeacherAssigned: String = "No teacher assigned yet"
+    override val applyTeacherToAllLevels: String = "Assign this teacher to all levels of this subject"
+    override val editSubject: String = "Edit Subject & Pricing"
+    override val deleteSubjectConfirm: String = "Are you sure you want to delete this subject?"
+    override val commonLevels: String = "Common Levels"
+    override val commonSubjects: String = "Common Subjects"
+    override val perMonth: String = "/ month"
 }
 
 class FrenchStrings : AppStrings {
@@ -1395,6 +1479,34 @@ class FrenchStrings : AppStrings {
     override val noRoomsYet: String = "Aucune salle ajoutée pour l'instant. Ajoutez des salles pour organiser l'emploi du temps."
     override val quickTimeSlots: String = "Créneaux horaires rapides"
     override val sessionDetails: String = "Détails de la séance"
+
+    override val selectSubject: String = "Sélectionner la matière"
+    override val teacherSubject: String = "Matière enseignée par le professeur"
+    override val studentSubjects: String = "Matières de l'élève"
+    override val orAddNewSubject: String = "Ou écrire une nouvelle matière à ajouter directement"
+    override val addSubjectPrompt: String = "Tapez le nom de la matière pour l'ajouter automatiquement"
+    override val subjectCreatedDirectly: String = "Matière ajoutée directement au programme"
+    override val addAnotherSubject: String = "Ajouter une autre matière pour l'élève"
+    override val noSubjectsAvailable: String = "Aucune matière disponible, tapez une nouvelle matière ci-dessous"
+    override val newSubjectNameInput: String = "Nom de la nouvelle matière"
+    override val assignSubjectToTeacher: String = "Attribuer la matière au professeur"
+    override val removeSubject: String = "Supprimer la matière"
+    override val teacherSubjectsPrompt: String = "Matières enseignées (plusieurs choix possibles)"
+    override val addAnotherSubjectForTeacher: String = "Attribuer une autre matière au professeur"
+
+    override val subjectsPricingTitle: String = "Matières, Niveaux et Tarifs"
+    override val addSubjectLevel: String = "Ajouter une matière et niveau"
+    override val subjectLevel: String = "Niveau scolaire"
+    override val subjectPrice: String = "Tarif mensuel (DH)"
+    override val assignedTeacher: String = "Enseignant assigné"
+    override val selectTeacher: String = "Sélectionner l'enseignant"
+    override val noTeacherAssigned: String = "Aucun enseignant assigné"
+    override val applyTeacherToAllLevels: String = "Assigner cet enseignant à tous les niveaux de cette matière"
+    override val editSubject: String = "Modifier la matière et le tarif"
+    override val deleteSubjectConfirm: String = "Voulez-vous supprimer cette matière ?"
+    override val commonLevels: String = "Niveaux courants"
+    override val commonSubjects: String = "Matières courantes"
+    override val perMonth: String = "/ mois"
 }
 
 object Translations {

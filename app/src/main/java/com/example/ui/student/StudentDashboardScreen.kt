@@ -39,9 +39,22 @@ fun StudentDashboardScreen(
     onLogout: () -> Unit
 ) {
     val strings = Translations.get(currentLanguage)
-    val currentStudent = firebaseManager.currentUser
+    val liveStudent by firebaseManager.observeUser(firebaseManager.currentUser?.id ?: "").collectAsState(initial = firebaseManager.currentUser)
+    val currentStudent = liveStudent ?: firebaseManager.currentUser
 
-    val slots by firebaseManager.observeTimetable(groupId = currentStudent?.groupIds?.firstOrNull()).collectAsState(initial = emptyList())
+    val allTimetableSlots by firebaseManager.observeTimetable().collectAsState(initial = emptyList())
+    val studentSubjectIds = currentStudent?.subjectIds ?: emptyList()
+    val studentGroupIds = currentStudent?.groupIds ?: emptyList()
+    val slots = remember(allTimetableSlots, studentSubjectIds, studentGroupIds) {
+        if (studentGroupIds.isEmpty() && studentSubjectIds.isEmpty()) {
+            allTimetableSlots.take(3)
+        } else {
+            allTimetableSlots.filter { slot ->
+                (studentGroupIds.isNotEmpty() && studentGroupIds.contains(slot.groupId)) ||
+                (studentSubjectIds.isNotEmpty() && studentSubjectIds.contains(slot.subjectId))
+            }
+        }
+    }
     val myGrades by firebaseManager.observeGrades(studentId = currentStudent?.id).collectAsState(initial = emptyList())
     val attendanceRecords by firebaseManager.observeAttendance().collectAsState(initial = emptyList())
     val announcements by firebaseManager.observeAnnouncements().collectAsState(initial = emptyList())
@@ -172,6 +185,115 @@ fun StudentDashboardScreen(
                     color = Color(0xFF16A34A),
                     modifier = Modifier.weight(1f)
                 )
+            }
+
+            // My Registered Subjects Section (المواد المسجلة)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = strings.studentSubjects,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = SchoolPrimary.copy(alpha = 0.12f)
+                ) {
+                    Text(
+                        text = "${myEnrollments.size} ${if (currentLanguage == AppLanguage.ARABIC) "مواد" else "subjects"}",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = SchoolPrimary,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                    )
+                }
+            }
+
+            if (myEnrollments.isEmpty()) {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.MenuBook,
+                            contentDescription = null,
+                            tint = Color.Gray,
+                            modifier = Modifier.size(28.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = strings.noEnrolledSubjects,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            } else {
+                myEnrollments.forEach { enroll ->
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = SchoolPrimary.copy(alpha = 0.12f),
+                                modifier = Modifier.size(44.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.MenuBook,
+                                        contentDescription = null,
+                                        tint = SchoolPrimary,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = enroll.subjectName,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                if (enroll.teacherName.isNotBlank()) {
+                                    Text(
+                                        text = "${strings.roleTeacher}: ${enroll.teacherName}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = SchoolPrimary
+                                    )
+                                }
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = Color(0xFF16A34A).copy(alpha = 0.12f)
+                            ) {
+                                Text(
+                                    text = "${enroll.monthlyFee.toInt()} ${strings.currencySymbol}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF16A34A),
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                )
+                            }
+                        }
+                    }
+                }
             }
 
             // My Fees Section (Multi-Subject Breakdown - STRICT PRIVACY)

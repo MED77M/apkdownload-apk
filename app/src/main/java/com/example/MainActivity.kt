@@ -12,10 +12,12 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -59,6 +61,7 @@ sealed class Screen {
     data object AdminFinance : Screen()
     data object AdminActivityLog : Screen()
     data object AdminReports : Screen()
+    data object AdminSubjects : Screen()
     data object Announcements : Screen()
     data class TeacherAttendance(val slot: TimetableSlot? = null) : Screen()
     data object TeacherResources : Screen()
@@ -99,6 +102,15 @@ class MainActivity : ComponentActivity() {
             val scope = rememberCoroutineScope()
 
             var currentUser by remember { mutableStateOf(firebaseManager.currentUser) }
+            val liveUser by firebaseManager.observeUser(currentUser?.id ?: "").collectAsState(initial = currentUser)
+
+            LaunchedEffect(liveUser) {
+                if (liveUser != null && liveUser != currentUser) {
+                    currentUser = liveUser
+                    firebaseManager.currentUser = liveUser
+                }
+            }
+
             var currentScreen by remember { mutableStateOf<Screen>(Screen.Login) }
 
             // Device permissions request on first launch (Microphone for voice notes + Notifications for Android 13+)
@@ -252,317 +264,513 @@ class MainActivity : ComponentActivity() {
                                     activeTab = 0
                                 }
 
-                                Scaffold(
-                                    bottomBar = {
-                                        NavigationBar(
-                                            containerColor = MaterialTheme.colorScheme.surface,
-                                            contentColor = SchoolPrimary,
-                                            tonalElevation = 6.dp
-                                        ) {
-                                            when (role) {
-                                                Role.ADMIN -> {
-                                                    NavigationBarItem(
-                                                        selected = activeTab == 0,
-                                                        onClick = { activeTab = 0 },
-                                                        icon = { Icon(Icons.Default.Dashboard, contentDescription = null) },
-                                                        label = { Text(strings.navDashboard) },
-                                                        modifier = Modifier.testTag("nav_tab_dashboard")
-                                                    )
-                                                    NavigationBarItem(
-                                                        selected = activeTab == 1,
-                                                        onClick = { activeTab = 1 },
-                                                        icon = { Icon(Icons.Default.People, contentDescription = null) },
-                                                        label = { Text(strings.navUsers) },
-                                                        modifier = Modifier.testTag("nav_tab_users")
-                                                    )
-                                                    NavigationBarItem(
-                                                        selected = activeTab == 2,
-                                                        onClick = { activeTab = 2 },
-                                                        icon = { Icon(Icons.Default.CalendarMonth, contentDescription = null) },
-                                                        label = { Text(strings.navTimetable) },
-                                                        modifier = Modifier.testTag("nav_tab_timetable")
-                                                    )
-                                                    NavigationBarItem(
-                                                        selected = activeTab == 3,
-                                                        onClick = {
-                                                            activeTab = 3
-                                                            BadgeManager.clearMessagesBadge()
-                                                        },
-                                                        icon = {
-                                                            BadgedBox(
-                                                                badge = {
-                                                                    if (hasUnreadMessages) {
-                                                                        Badge(
-                                                                            containerColor = Color(0xFFEF4444),
-                                                                            modifier = Modifier.size(9.dp)
-                                                                        )
-                                                                    }
-                                                                }
-                                                            ) {
-                                                                Icon(Icons.Default.Chat, contentDescription = strings.navChat)
-                                                            }
-                                                        },
-                                                        label = { Text(strings.navChat) },
-                                                        modifier = Modifier.testTag("nav_tab_chat")
-                                                    )
-                                                    NavigationBarItem(
-                                                        selected = activeTab == 4,
-                                                        onClick = { activeTab = 4 },
-                                                        icon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                                                        label = { Text(strings.navSettings) },
-                                                        modifier = Modifier.testTag("nav_tab_settings")
-                                                    )
-                                                }
+                                @Composable
+                                fun CurrentTabContent() {
+                                    when (role) {
+                                        Role.ADMIN -> {
+                                            when (activeTab) {
+                                                0 -> AdminDashboardScreen(
+                                                    firebaseManager = firebaseManager,
+                                                    currentLanguage = currentLanguage,
+                                                    onLanguageChange = { currentLanguage = it },
+                                                    onNavigateToUsers = { activeTab = 1 },
+                                                    onNavigateToSubjects = { currentScreen = Screen.AdminSubjects },
+                                                    onNavigateToTimetable = { activeTab = 2 },
+                                                    onNavigateToFinance = { currentScreen = Screen.AdminFinance },
+                                                    onNavigateToReports = { currentScreen = Screen.AdminReports },
+                                                    onNavigateToAnnouncements = { currentScreen = Screen.Announcements },
+                                                    onLogout = { logout() }
+                                                )
+                                                1 -> AdminUsersScreen(
+                                                    firebaseManager = firebaseManager,
+                                                    currentLanguage = currentLanguage,
+                                                    onLanguageChange = { currentLanguage = it },
+                                                    onBack = { activeTab = 0 },
+                                                    onNavigateToSubjects = { currentScreen = Screen.AdminSubjects }
+                                                )
+                                                2 -> AdminTimetableScreen(
+                                                    firebaseManager = firebaseManager,
+                                                    currentLanguage = currentLanguage,
+                                                    onLanguageChange = { currentLanguage = it },
+                                                    onBack = { activeTab = 0 }
+                                                )
+                                                3 -> ChatListScreen(
+                                                    firebaseManager = firebaseManager,
+                                                    currentLanguage = currentLanguage,
+                                                    onLanguageChange = { currentLanguage = it },
+                                                    onOpenConversation = { id, title, isGroup ->
+                                                        currentScreen = Screen.ChatConversation(id, title, isGroup)
+                                                    },
+                                                    onOpenSubjectQa = { currentScreen = Screen.SubjectQa }
+                                                )
+                                                4 -> SettingsScreen(
+                                                    firebaseManager = firebaseManager,
+                                                    currentLanguage = currentLanguage,
+                                                    onLanguageChange = { currentLanguage = it },
+                                                    onOpenFirebaseSetup = {
+                                                        currentScreen = Screen.FirebaseSetup
+                                                    },
+                                                    onLogout = { logout() }
+                                                )
+                                            }
+                                        }
 
-                                                Role.TEACHER -> {
-                                                    NavigationBarItem(
-                                                        selected = activeTab == 0,
-                                                        onClick = { activeTab = 0 },
-                                                        icon = { Icon(Icons.Default.Dashboard, contentDescription = null) },
-                                                        label = { Text(strings.navDashboard) },
-                                                        modifier = Modifier.testTag("nav_tab_dashboard")
-                                                    )
-                                                    NavigationBarItem(
-                                                        selected = activeTab == 1,
-                                                        onClick = { activeTab = 1 },
-                                                        icon = { Icon(Icons.Default.ChecklistRtl, contentDescription = null) },
-                                                        label = { Text(strings.navAttendance) },
-                                                        modifier = Modifier.testTag("nav_tab_attendance")
-                                                    )
-                                                    NavigationBarItem(
-                                                        selected = activeTab == 2,
-                                                        onClick = { activeTab = 2 },
-                                                        icon = { Icon(Icons.Default.Assignment, contentDescription = null) },
-                                                        label = { Text(strings.navHomework) },
-                                                        modifier = Modifier.testTag("nav_tab_homework")
-                                                    )
-                                                    NavigationBarItem(
-                                                        selected = activeTab == 3,
-                                                        onClick = {
-                                                            activeTab = 3
-                                                            BadgeManager.clearMessagesBadge()
-                                                        },
-                                                        icon = {
-                                                            BadgedBox(
-                                                                badge = {
-                                                                    if (hasUnreadMessages) {
-                                                                        Badge(
-                                                                            containerColor = Color(0xFFEF4444),
-                                                                            modifier = Modifier.size(9.dp)
-                                                                        )
-                                                                    }
-                                                                }
-                                                            ) {
-                                                                Icon(Icons.Default.Chat, contentDescription = strings.navChat)
-                                                            }
-                                                        },
-                                                        label = { Text(strings.navChat) },
-                                                        modifier = Modifier.testTag("nav_tab_chat")
-                                                    )
-                                                    NavigationBarItem(
-                                                        selected = activeTab == 4,
-                                                        onClick = { activeTab = 4 },
-                                                        icon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                                                        label = { Text(strings.navSettings) },
-                                                        modifier = Modifier.testTag("nav_tab_settings")
-                                                    )
-                                                }
+                                        Role.TEACHER -> {
+                                            when (activeTab) {
+                                                0 -> TeacherDashboardScreen(
+                                                    firebaseManager = firebaseManager,
+                                                    currentLanguage = currentLanguage,
+                                                    onLanguageChange = { currentLanguage = it },
+                                                    onNavigateToAttendance = { slot ->
+                                                        currentScreen = Screen.TeacherAttendance(slot)
+                                                    },
+                                                    onNavigateToResources = { currentScreen = Screen.TeacherResources },
+                                                    onNavigateToHomework = { activeTab = 2 },
+                                                    onNavigateToGrades = { currentScreen = Screen.TeacherGrades },
+                                                    onNavigateToChat = { activeTab = 3 },
+                                                    onNavigateToFinance = { currentScreen = Screen.TeacherFinance },
+                                                    onNavigateToAnnouncements = { currentScreen = Screen.Announcements },
+                                                    onLogout = { logout() }
+                                                )
+                                                1 -> TeacherAttendanceScreen(
+                                                    firebaseManager = firebaseManager,
+                                                    initialSlot = null,
+                                                    currentLanguage = currentLanguage,
+                                                    onLanguageChange = { currentLanguage = it },
+                                                    onBack = { activeTab = 0 }
+                                                )
+                                                2 -> TeacherHomeworkScreen(
+                                                    firebaseManager = firebaseManager,
+                                                    currentLanguage = currentLanguage,
+                                                    onLanguageChange = { currentLanguage = it },
+                                                    onBack = { activeTab = 0 }
+                                                )
+                                                3 -> ChatListScreen(
+                                                    firebaseManager = firebaseManager,
+                                                    currentLanguage = currentLanguage,
+                                                    onLanguageChange = { currentLanguage = it },
+                                                    onOpenConversation = { id, title, isGroup ->
+                                                        currentScreen = Screen.ChatConversation(id, title, isGroup)
+                                                    },
+                                                    onOpenSubjectQa = { currentScreen = Screen.SubjectQa }
+                                                )
+                                                4 -> SettingsScreen(
+                                                    firebaseManager = firebaseManager,
+                                                    currentLanguage = currentLanguage,
+                                                    onLanguageChange = { currentLanguage = it },
+                                                    onLogout = { logout() }
+                                                )
+                                            }
+                                        }
 
-                                                Role.STUDENT -> {
-                                                    NavigationBarItem(
-                                                        selected = activeTab == 0,
-                                                        onClick = { activeTab = 0 },
-                                                        icon = { Icon(Icons.Default.Dashboard, contentDescription = null) },
-                                                        label = { Text(strings.navDashboard) },
-                                                        modifier = Modifier.testTag("nav_tab_dashboard")
-                                                    )
-                                                    NavigationBarItem(
-                                                        selected = activeTab == 1,
-                                                        onClick = { activeTab = 1 },
-                                                        icon = { Icon(Icons.Default.CalendarMonth, contentDescription = null) },
-                                                        label = { Text(strings.navTimetable) },
-                                                        modifier = Modifier.testTag("nav_tab_timetable")
-                                                    )
-                                                    NavigationBarItem(
-                                                        selected = activeTab == 2,
-                                                        onClick = { activeTab = 2 },
-                                                        icon = { Icon(Icons.Default.Assignment, contentDescription = null) },
-                                                        label = { Text(strings.navHomework) },
-                                                        modifier = Modifier.testTag("nav_tab_homework")
-                                                    )
-                                                    NavigationBarItem(
-                                                        selected = activeTab == 3,
-                                                        onClick = {
-                                                            activeTab = 3
-                                                            BadgeManager.clearMessagesBadge()
-                                                        },
-                                                        icon = {
-                                                            BadgedBox(
-                                                                badge = {
-                                                                    if (hasUnreadMessages) {
-                                                                        Badge(
-                                                                            containerColor = Color(0xFFEF4444),
-                                                                            modifier = Modifier.size(9.dp)
-                                                                        )
-                                                                    }
-                                                                }
-                                                            ) {
-                                                                Icon(Icons.Default.Chat, contentDescription = strings.navChat)
-                                                            }
-                                                        },
-                                                        label = { Text(strings.navChat) },
-                                                        modifier = Modifier.testTag("nav_tab_chat")
-                                                    )
-                                                    NavigationBarItem(
-                                                        selected = activeTab == 4,
-                                                        onClick = { activeTab = 4 },
-                                                        icon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                                                        label = { Text(strings.navSettings) },
-                                                        modifier = Modifier.testTag("nav_tab_settings")
-                                                    )
-                                                }
+                                        Role.STUDENT -> {
+                                            when (activeTab) {
+                                                0 -> StudentDashboardScreen(
+                                                    firebaseManager = firebaseManager,
+                                                    currentLanguage = currentLanguage,
+                                                    onLanguageChange = { currentLanguage = it },
+                                                    onNavigateToTimetable = { activeTab = 1 },
+                                                    onNavigateToHomework = { activeTab = 2 },
+                                                    onNavigateToGrades = { currentScreen = Screen.StudentGrades },
+                                                    onNavigateToResources = { currentScreen = Screen.StudentResources },
+                                                    onNavigateToChat = { activeTab = 3 },
+                                                    onNavigateToAnnouncements = { currentScreen = Screen.Announcements },
+                                                    onLogout = { logout() }
+                                                )
+                                                1 -> StudentTimetableScreen(
+                                                    firebaseManager = firebaseManager,
+                                                    currentLanguage = currentLanguage,
+                                                    onLanguageChange = { currentLanguage = it },
+                                                    onBack = { activeTab = 0 }
+                                                )
+                                                2 -> StudentHomeworkScreen(
+                                                    firebaseManager = firebaseManager,
+                                                    currentLanguage = currentLanguage,
+                                                    onLanguageChange = { currentLanguage = it },
+                                                    onBack = { activeTab = 0 }
+                                                )
+                                                3 -> ChatListScreen(
+                                                    firebaseManager = firebaseManager,
+                                                    currentLanguage = currentLanguage,
+                                                    onLanguageChange = { currentLanguage = it },
+                                                    onOpenConversation = { id, title, isGroup ->
+                                                        currentScreen = Screen.ChatConversation(id, title, isGroup)
+                                                    },
+                                                    onOpenSubjectQa = { currentScreen = Screen.SubjectQa }
+                                                )
+                                                4 -> SettingsScreen(
+                                                    firebaseManager = firebaseManager,
+                                                    currentLanguage = currentLanguage,
+                                                    onLanguageChange = { currentLanguage = it },
+                                                    onLogout = { logout() }
+                                                )
                                             }
                                         }
                                     }
-                                ) { innerPadding ->
-                                    Box(modifier = Modifier.padding(innerPadding)) {
-                                        when (role) {
-                                            Role.ADMIN -> {
-                                                when (activeTab) {
-                                                    0 -> AdminDashboardScreen(
-                                                        firebaseManager = firebaseManager,
-                                                        currentLanguage = currentLanguage,
-                                                        onLanguageChange = { currentLanguage = it },
-                                                        onNavigateToUsers = { activeTab = 1 },
-                                                        onNavigateToTimetable = { activeTab = 2 },
-                                                        onNavigateToFinance = { currentScreen = Screen.AdminFinance },
-                                                        onNavigateToReports = { currentScreen = Screen.AdminReports },
-                                                        onNavigateToAnnouncements = { currentScreen = Screen.Announcements },
-                                                        onLogout = { logout() }
-                                                    )
-                                                    1 -> AdminUsersScreen(
-                                                        firebaseManager = firebaseManager,
-                                                        currentLanguage = currentLanguage,
-                                                        onLanguageChange = { currentLanguage = it },
-                                                        onBack = { activeTab = 0 }
-                                                    )
-                                                    2 -> AdminTimetableScreen(
-                                                        firebaseManager = firebaseManager,
-                                                        currentLanguage = currentLanguage,
-                                                        onLanguageChange = { currentLanguage = it },
-                                                        onBack = { activeTab = 0 }
-                                                    )
-                                                    3 -> ChatListScreen(
-                                                        firebaseManager = firebaseManager,
-                                                        currentLanguage = currentLanguage,
-                                                        onLanguageChange = { currentLanguage = it },
-                                                        onOpenConversation = { id, title, isGroup ->
-                                                            currentScreen = Screen.ChatConversation(id, title, isGroup)
-                                                        },
-                                                         onOpenSubjectQa = { currentScreen = Screen.SubjectQa }
-                                                    )
-                                                    4 -> SettingsScreen(
-                                                        firebaseManager = firebaseManager,
-                                                        currentLanguage = currentLanguage,
-                                                        onLanguageChange = { currentLanguage = it },
-                                                        onOpenFirebaseSetup = {
-                                                            currentScreen = Screen.FirebaseSetup
-                                                        },
-                                                        onLogout = { logout() }
-                                                    )
+                                }
+
+                                BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                                    val isTablet = maxWidth >= 720.dp
+
+                                    if (isTablet) {
+                                        Row(modifier = Modifier.fillMaxSize()) {
+                                            NavigationRail(
+                                                containerColor = MaterialTheme.colorScheme.surface,
+                                                contentColor = SchoolPrimary,
+                                                header = {
+                                                    Spacer(modifier = Modifier.height(12.dp))
+                                                    Surface(
+                                                        shape = CircleShape,
+                                                        color = SchoolPrimary.copy(alpha = 0.12f),
+                                                        modifier = Modifier.size(44.dp)
+                                                    ) {
+                                                        Box(contentAlignment = Alignment.Center) {
+                                                            Icon(
+                                                                imageVector = when (role) {
+                                                                    Role.ADMIN -> Icons.Default.AdminPanelSettings
+                                                                    Role.TEACHER -> Icons.Default.School
+                                                                    Role.STUDENT -> Icons.Default.Person
+                                                                },
+                                                                contentDescription = null,
+                                                                tint = SchoolPrimary,
+                                                                modifier = Modifier.size(24.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                    Spacer(modifier = Modifier.height(16.dp))
+                                                },
+                                                modifier = Modifier.fillMaxHeight()
+                                            ) {
+                                                when (role) {
+                                                    Role.ADMIN -> {
+                                                        NavigationRailItem(
+                                                            selected = activeTab == 0,
+                                                            onClick = { activeTab = 0 },
+                                                            icon = { Icon(Icons.Default.Dashboard, contentDescription = null) },
+                                                            label = { Text(strings.navDashboard) },
+                                                            modifier = Modifier.testTag("nav_rail_dashboard")
+                                                        )
+                                                        NavigationRailItem(
+                                                            selected = activeTab == 1,
+                                                            onClick = { activeTab = 1 },
+                                                            icon = { Icon(Icons.Default.People, contentDescription = null) },
+                                                            label = { Text(strings.navUsers) },
+                                                            modifier = Modifier.testTag("nav_rail_users")
+                                                        )
+                                                        NavigationRailItem(
+                                                            selected = activeTab == 2,
+                                                            onClick = { activeTab = 2 },
+                                                            icon = { Icon(Icons.Default.CalendarMonth, contentDescription = null) },
+                                                            label = { Text(strings.navTimetable) },
+                                                            modifier = Modifier.testTag("nav_rail_timetable")
+                                                        )
+                                                        NavigationRailItem(
+                                                            selected = activeTab == 3,
+                                                            onClick = {
+                                                                activeTab = 3
+                                                                BadgeManager.clearMessagesBadge()
+                                                            },
+                                                            icon = {
+                                                                BadgedBox(badge = {
+                                                                    if (hasUnreadMessages) {
+                                                                        Badge(containerColor = Color(0xFFEF4444), modifier = Modifier.size(9.dp))
+                                                                    }
+                                                                }) {
+                                                                    Icon(Icons.Default.Chat, contentDescription = strings.navChat)
+                                                                }
+                                                            },
+                                                            label = { Text(strings.navChat) },
+                                                            modifier = Modifier.testTag("nav_rail_chat")
+                                                        )
+                                                        NavigationRailItem(
+                                                            selected = activeTab == 4,
+                                                            onClick = { activeTab = 4 },
+                                                            icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                                                            label = { Text(strings.navSettings) },
+                                                            modifier = Modifier.testTag("nav_rail_settings")
+                                                        )
+                                                    }
+
+                                                    Role.TEACHER -> {
+                                                        NavigationRailItem(
+                                                            selected = activeTab == 0,
+                                                            onClick = { activeTab = 0 },
+                                                            icon = { Icon(Icons.Default.Dashboard, contentDescription = null) },
+                                                            label = { Text(strings.navDashboard) },
+                                                            modifier = Modifier.testTag("nav_rail_dashboard")
+                                                        )
+                                                        NavigationRailItem(
+                                                            selected = activeTab == 1,
+                                                            onClick = { activeTab = 1 },
+                                                            icon = { Icon(Icons.Default.ChecklistRtl, contentDescription = null) },
+                                                            label = { Text(strings.navAttendance) },
+                                                            modifier = Modifier.testTag("nav_rail_attendance")
+                                                        )
+                                                        NavigationRailItem(
+                                                            selected = activeTab == 2,
+                                                            onClick = { activeTab = 2 },
+                                                            icon = { Icon(Icons.Default.Assignment, contentDescription = null) },
+                                                            label = { Text(strings.navHomework) },
+                                                            modifier = Modifier.testTag("nav_rail_homework")
+                                                        )
+                                                        NavigationRailItem(
+                                                            selected = activeTab == 3,
+                                                            onClick = {
+                                                                activeTab = 3
+                                                                BadgeManager.clearMessagesBadge()
+                                                            },
+                                                            icon = {
+                                                                BadgedBox(badge = {
+                                                                    if (hasUnreadMessages) {
+                                                                        Badge(containerColor = Color(0xFFEF4444), modifier = Modifier.size(9.dp))
+                                                                    }
+                                                                }) {
+                                                                    Icon(Icons.Default.Chat, contentDescription = strings.navChat)
+                                                                }
+                                                            },
+                                                            label = { Text(strings.navChat) },
+                                                            modifier = Modifier.testTag("nav_rail_chat")
+                                                        )
+                                                        NavigationRailItem(
+                                                            selected = activeTab == 4,
+                                                            onClick = { activeTab = 4 },
+                                                            icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                                                            label = { Text(strings.navSettings) },
+                                                            modifier = Modifier.testTag("nav_rail_settings")
+                                                        )
+                                                    }
+
+                                                    Role.STUDENT -> {
+                                                        NavigationRailItem(
+                                                            selected = activeTab == 0,
+                                                            onClick = { activeTab = 0 },
+                                                            icon = { Icon(Icons.Default.Dashboard, contentDescription = null) },
+                                                            label = { Text(strings.navDashboard) },
+                                                            modifier = Modifier.testTag("nav_rail_dashboard")
+                                                        )
+                                                        NavigationRailItem(
+                                                            selected = activeTab == 1,
+                                                            onClick = { activeTab = 1 },
+                                                            icon = { Icon(Icons.Default.CalendarMonth, contentDescription = null) },
+                                                            label = { Text(strings.navTimetable) },
+                                                            modifier = Modifier.testTag("nav_rail_timetable")
+                                                        )
+                                                        NavigationRailItem(
+                                                            selected = activeTab == 2,
+                                                            onClick = { activeTab = 2 },
+                                                            icon = { Icon(Icons.Default.Assignment, contentDescription = null) },
+                                                            label = { Text(strings.navHomework) },
+                                                            modifier = Modifier.testTag("nav_rail_homework")
+                                                        )
+                                                        NavigationRailItem(
+                                                            selected = activeTab == 3,
+                                                            onClick = {
+                                                                activeTab = 3
+                                                                BadgeManager.clearMessagesBadge()
+                                                            },
+                                                            icon = {
+                                                                BadgedBox(badge = {
+                                                                    if (hasUnreadMessages) {
+                                                                        Badge(containerColor = Color(0xFFEF4444), modifier = Modifier.size(9.dp))
+                                                                    }
+                                                                }) {
+                                                                    Icon(Icons.Default.Chat, contentDescription = strings.navChat)
+                                                                }
+                                                            },
+                                                            label = { Text(strings.navChat) },
+                                                            modifier = Modifier.testTag("nav_rail_chat")
+                                                        )
+                                                        NavigationRailItem(
+                                                            selected = activeTab == 4,
+                                                            onClick = { activeTab = 4 },
+                                                            icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                                                            label = { Text(strings.navSettings) },
+                                                            modifier = Modifier.testTag("nav_rail_settings")
+                                                        )
+                                                    }
                                                 }
                                             }
+                                            VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                                            Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                                                CurrentTabContent()
+                                            }
+                                        }
+                                    } else {
+                                        Scaffold(
+                                            bottomBar = {
+                                                NavigationBar(
+                                                    containerColor = MaterialTheme.colorScheme.surface,
+                                                    contentColor = SchoolPrimary,
+                                                    tonalElevation = 6.dp
+                                                ) {
+                                                    when (role) {
+                                                        Role.ADMIN -> {
+                                                            NavigationBarItem(
+                                                                selected = activeTab == 0,
+                                                                onClick = { activeTab = 0 },
+                                                                icon = { Icon(Icons.Default.Dashboard, contentDescription = null) },
+                                                                label = { Text(strings.navDashboard) },
+                                                                modifier = Modifier.testTag("nav_tab_dashboard")
+                                                            )
+                                                            NavigationBarItem(
+                                                                selected = activeTab == 1,
+                                                                onClick = { activeTab = 1 },
+                                                                icon = { Icon(Icons.Default.People, contentDescription = null) },
+                                                                label = { Text(strings.navUsers) },
+                                                                modifier = Modifier.testTag("nav_tab_users")
+                                                            )
+                                                            NavigationBarItem(
+                                                                selected = activeTab == 2,
+                                                                onClick = { activeTab = 2 },
+                                                                icon = { Icon(Icons.Default.CalendarMonth, contentDescription = null) },
+                                                                label = { Text(strings.navTimetable) },
+                                                                modifier = Modifier.testTag("nav_tab_timetable")
+                                                            )
+                                                            NavigationBarItem(
+                                                                selected = activeTab == 3,
+                                                                onClick = {
+                                                                    activeTab = 3
+                                                                    BadgeManager.clearMessagesBadge()
+                                                                },
+                                                                icon = {
+                                                                    BadgedBox(
+                                                                        badge = {
+                                                                            if (hasUnreadMessages) {
+                                                                                Badge(
+                                                                                    containerColor = Color(0xFFEF4444),
+                                                                                    modifier = Modifier.size(9.dp)
+                                                                                )
+                                                                            }
+                                                                        }
+                                                                    ) {
+                                                                        Icon(Icons.Default.Chat, contentDescription = strings.navChat)
+                                                                    }
+                                                                },
+                                                                label = { Text(strings.navChat) },
+                                                                modifier = Modifier.testTag("nav_tab_chat")
+                                                            )
+                                                            NavigationBarItem(
+                                                                selected = activeTab == 4,
+                                                                onClick = { activeTab = 4 },
+                                                                icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                                                                label = { Text(strings.navSettings) },
+                                                                modifier = Modifier.testTag("nav_tab_settings")
+                                                            )
+                                                        }
 
-                                             Role.TEACHER -> {
-                                                when (activeTab) {
-                                                    0 -> TeacherDashboardScreen(
-                                                        firebaseManager = firebaseManager,
-                                                        currentLanguage = currentLanguage,
-                                                        onLanguageChange = { currentLanguage = it },
-                                                        onNavigateToAttendance = { slot ->
-                                                            currentScreen = Screen.TeacherAttendance(slot)
-                                                        },
-                                                        onNavigateToResources = { currentScreen = Screen.TeacherResources },
-                                                        onNavigateToHomework = { activeTab = 2 },
-                                                        onNavigateToGrades = { currentScreen = Screen.TeacherGrades },
-                                                        onNavigateToChat = { activeTab = 3 },
-                                                        onNavigateToFinance = { currentScreen = Screen.TeacherFinance },
-                                                        onNavigateToAnnouncements = { currentScreen = Screen.Announcements },
-                                                        onLogout = { logout() }
-                                                    )
-                                                    1 -> TeacherAttendanceScreen(
-                                                        firebaseManager = firebaseManager,
-                                                        initialSlot = null,
-                                                        currentLanguage = currentLanguage,
-                                                        onLanguageChange = { currentLanguage = it },
-                                                        onBack = { activeTab = 0 }
-                                                    )
-                                                    2 -> TeacherHomeworkScreen(
-                                                        firebaseManager = firebaseManager,
-                                                        currentLanguage = currentLanguage,
-                                                        onLanguageChange = { currentLanguage = it },
-                                                        onBack = { activeTab = 0 }
-                                                    )
-                                                    3 -> ChatListScreen(
-                                                        firebaseManager = firebaseManager,
-                                                        currentLanguage = currentLanguage,
-                                                        onLanguageChange = { currentLanguage = it },
-                                                        onOpenConversation = { id, title, isGroup ->
-                                                            currentScreen = Screen.ChatConversation(id, title, isGroup)
-                                                        },
-                                                        onOpenSubjectQa = { currentScreen = Screen.SubjectQa }
-                                                    )
-                                                    4 -> SettingsScreen(
-                                                        firebaseManager = firebaseManager,
-                                                        currentLanguage = currentLanguage,
-                                                        onLanguageChange = { currentLanguage = it },
-                                                        onLogout = { logout() }
-                                                    )
+                                                        Role.TEACHER -> {
+                                                            NavigationBarItem(
+                                                                selected = activeTab == 0,
+                                                                onClick = { activeTab = 0 },
+                                                                icon = { Icon(Icons.Default.Dashboard, contentDescription = null) },
+                                                                label = { Text(strings.navDashboard) },
+                                                                modifier = Modifier.testTag("nav_tab_dashboard")
+                                                            )
+                                                            NavigationBarItem(
+                                                                selected = activeTab == 1,
+                                                                onClick = { activeTab = 1 },
+                                                                icon = { Icon(Icons.Default.ChecklistRtl, contentDescription = null) },
+                                                                label = { Text(strings.navAttendance) },
+                                                                modifier = Modifier.testTag("nav_tab_attendance")
+                                                            )
+                                                            NavigationBarItem(
+                                                                selected = activeTab == 2,
+                                                                onClick = { activeTab = 2 },
+                                                                icon = { Icon(Icons.Default.Assignment, contentDescription = null) },
+                                                                label = { Text(strings.navHomework) },
+                                                                modifier = Modifier.testTag("nav_tab_homework")
+                                                            )
+                                                            NavigationBarItem(
+                                                                selected = activeTab == 3,
+                                                                onClick = {
+                                                                    activeTab = 3
+                                                                    BadgeManager.clearMessagesBadge()
+                                                                },
+                                                                icon = {
+                                                                    BadgedBox(
+                                                                        badge = {
+                                                                            if (hasUnreadMessages) {
+                                                                                Badge(
+                                                                                    containerColor = Color(0xFFEF4444),
+                                                                                    modifier = Modifier.size(9.dp)
+                                                                                )
+                                                                            }
+                                                                        }
+                                                                    ) {
+                                                                        Icon(Icons.Default.Chat, contentDescription = strings.navChat)
+                                                                    }
+                                                                },
+                                                                label = { Text(strings.navChat) },
+                                                                modifier = Modifier.testTag("nav_tab_chat")
+                                                            )
+                                                            NavigationBarItem(
+                                                                selected = activeTab == 4,
+                                                                onClick = { activeTab = 4 },
+                                                                icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                                                                label = { Text(strings.navSettings) },
+                                                                modifier = Modifier.testTag("nav_tab_settings")
+                                                            )
+                                                        }
+
+                                                        Role.STUDENT -> {
+                                                            NavigationBarItem(
+                                                                selected = activeTab == 0,
+                                                                onClick = { activeTab = 0 },
+                                                                icon = { Icon(Icons.Default.Dashboard, contentDescription = null) },
+                                                                label = { Text(strings.navDashboard) },
+                                                                modifier = Modifier.testTag("nav_tab_dashboard")
+                                                            )
+                                                            NavigationBarItem(
+                                                                selected = activeTab == 1,
+                                                                onClick = { activeTab = 1 },
+                                                                icon = { Icon(Icons.Default.CalendarMonth, contentDescription = null) },
+                                                                label = { Text(strings.navTimetable) },
+                                                                modifier = Modifier.testTag("nav_tab_timetable")
+                                                            )
+                                                            NavigationBarItem(
+                                                                selected = activeTab == 2,
+                                                                onClick = { activeTab = 2 },
+                                                                icon = { Icon(Icons.Default.Assignment, contentDescription = null) },
+                                                                label = { Text(strings.navHomework) },
+                                                                modifier = Modifier.testTag("nav_tab_homework")
+                                                            )
+                                                            NavigationBarItem(
+                                                                selected = activeTab == 3,
+                                                                onClick = {
+                                                                    activeTab = 3
+                                                                    BadgeManager.clearMessagesBadge()
+                                                                },
+                                                                icon = {
+                                                                    BadgedBox(
+                                                                        badge = {
+                                                                            if (hasUnreadMessages) {
+                                                                                Badge(
+                                                                                    containerColor = Color(0xFFEF4444),
+                                                                                    modifier = Modifier.size(9.dp)
+                                                                                )
+                                                                            }
+                                                                        }
+                                                                    ) {
+                                                                        Icon(Icons.Default.Chat, contentDescription = strings.navChat)
+                                                                    }
+                                                                },
+                                                                label = { Text(strings.navChat) },
+                                                                modifier = Modifier.testTag("nav_tab_chat")
+                                                            )
+                                                            NavigationBarItem(
+                                                                selected = activeTab == 4,
+                                                                onClick = { activeTab = 4 },
+                                                                icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                                                                label = { Text(strings.navSettings) },
+                                                                modifier = Modifier.testTag("nav_tab_settings")
+                                                            )
+                                                        }
+                                                    }
                                                 }
                                             }
-
-                                            Role.STUDENT -> {
-                                                when (activeTab) {
-                                                    0 -> StudentDashboardScreen(
-                                                        firebaseManager = firebaseManager,
-                                                        currentLanguage = currentLanguage,
-                                                        onLanguageChange = { currentLanguage = it },
-                                                        onNavigateToTimetable = { activeTab = 1 },
-                                                        onNavigateToHomework = { activeTab = 2 },
-                                                        onNavigateToGrades = { currentScreen = Screen.StudentGrades },
-                                                        onNavigateToResources = { currentScreen = Screen.StudentResources },
-                                                        onNavigateToChat = { activeTab = 3 },
-                                                        onNavigateToAnnouncements = { currentScreen = Screen.Announcements },
-                                                        onLogout = { logout() }
-                                                    )
-                                                    1 -> StudentTimetableScreen(
-                                                        firebaseManager = firebaseManager,
-                                                        currentLanguage = currentLanguage,
-                                                        onLanguageChange = { currentLanguage = it },
-                                                        onBack = { activeTab = 0 }
-                                                    )
-                                                    2 -> StudentHomeworkScreen(
-                                                        firebaseManager = firebaseManager,
-                                                        currentLanguage = currentLanguage,
-                                                        onLanguageChange = { currentLanguage = it },
-                                                        onBack = { activeTab = 0 }
-                                                    )
-                                                    3 -> ChatListScreen(
-                                                        firebaseManager = firebaseManager,
-                                                        currentLanguage = currentLanguage,
-                                                        onLanguageChange = { currentLanguage = it },
-                                                        onOpenConversation = { id, title, isGroup ->
-                                                            currentScreen = Screen.ChatConversation(id, title, isGroup)
-                                                        },
-                                                        onOpenSubjectQa = { currentScreen = Screen.SubjectQa }
-                                                    )
-                                                    4 -> SettingsScreen(
-                                                        firebaseManager = firebaseManager,
-                                                        currentLanguage = currentLanguage,
-                                                        onLanguageChange = { currentLanguage = it },
-                                                        onLogout = { logout() }
-                                                    )
-                                                }
+                                        ) { innerPadding ->
+                                            Box(modifier = Modifier.padding(innerPadding)) {
+                                                CurrentTabContent()
                                             }
                                         }
                                     }
@@ -603,6 +811,16 @@ class MainActivity : ComponentActivity() {
                             is Screen.AdminReports -> {
                                 BackHandler { currentScreen = Screen.Main(0) }
                                 AdminReportsScreen(
+                                    firebaseManager = firebaseManager,
+                                    currentLanguage = currentLanguage,
+                                    onLanguageChange = { currentLanguage = it },
+                                    onBack = { currentScreen = Screen.Main(0) }
+                                )
+                            }
+
+                            is Screen.AdminSubjects -> {
+                                BackHandler { currentScreen = Screen.Main(0) }
+                                AdminSubjectsScreen(
                                     firebaseManager = firebaseManager,
                                     currentLanguage = currentLanguage,
                                     onLanguageChange = { currentLanguage = it },

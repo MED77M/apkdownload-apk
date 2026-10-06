@@ -38,7 +38,8 @@ fun StudentGradesScreen(
     onBack: () -> Unit
 ) {
     val strings = Translations.get(currentLanguage)
-    val currentStudent = firebaseManager.currentUser
+    val liveStudent by firebaseManager.observeUser(firebaseManager.currentUser?.id ?: "").collectAsState(initial = firebaseManager.currentUser)
+    val currentStudent = liveStudent ?: firebaseManager.currentUser
 
     val grades by firebaseManager.observeGrades(studentId = currentStudent?.id).collectAsState(initial = emptyList())
 

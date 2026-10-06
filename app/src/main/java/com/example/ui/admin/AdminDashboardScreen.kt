@@ -34,6 +34,7 @@ fun AdminDashboardScreen(
     currentLanguage: AppLanguage,
     onLanguageChange: (AppLanguage) -> Unit,
     onNavigateToUsers: () -> Unit,
+    onNavigateToSubjects: () -> Unit,
     onNavigateToTimetable: () -> Unit,
     onNavigateToFinance: () -> Unit,
     onNavigateToReports: () -> Unit,
@@ -227,6 +228,14 @@ fun AdminDashboardScreen(
                         color = SchoolPrimary,
                         onClick = onNavigateToUsers,
                         testTag = "admin_action_users"
+                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
+                    DashboardActionRow(
+                        title = strings.subjectsPricingTitle,
+                        icon = Icons.Default.MenuBook,
+                        color = Color(0xFF6366F1),
+                        onClick = onNavigateToSubjects,
+                        testTag = "admin_action_subjects"
                     )
                     HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant)
                     DashboardActionRow(

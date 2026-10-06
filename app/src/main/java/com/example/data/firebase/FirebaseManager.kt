@@ -63,7 +63,10 @@ class FirebaseManager private constructor(private val context: Context) {
         get() = if (ensureFirebaseInitialized()) FirebaseStorage.getInstance() else null
 
     var currentUser: SchoolUser? = null
-        private set
+
+    fun updateCurrentSessionUser(user: SchoolUser?) {
+        currentUser = user
+    }
 
     fun getSavedLanguage(): String {
         return prefs.getString(PREF_LANGUAGE, "ar") ?: "ar"
@@ -725,6 +728,9 @@ class FirebaseManager private constructor(private val context: Context) {
                 return Result.failure(Exception("PRIMARY_ADMIN_PROTECTED"))
             }
             LocalDataStore.usersFlow.value = LocalDataStore.usersFlow.value.filter { it.id != userId }
+            LocalDataStore.enrollmentsFlow.value = LocalDataStore.enrollmentsFlow.value.filter { it.studentId != userId && it.teacherId != userId }
+            LocalDataStore.conversationsFlow.value = LocalDataStore.conversationsFlow.value.filter { !it.participantIds.contains(userId) }
+            LocalDataStore.timetableFlow.value = LocalDataStore.timetableFlow.value.filter { it.teacherId != userId }
             return Result.success(Unit)
         }
 
@@ -734,18 +740,76 @@ class FirebaseManager private constructor(private val context: Context) {
             if (doc.getBoolean("isPrimaryAdmin") == true) {
                 return Result.failure(Exception("PRIMARY_ADMIN_PROTECTED"))
             }
-            db.collection("users").document(userId).delete().await()
+            val roleStr = doc.getString("role") ?: ""
             val username = doc.getString("username")
+            val authUid = doc.getString("authUid")
+
+            // 1. Delete user document from users collection
+            db.collection("users").document(userId).delete().await()
             if (!username.isNullOrBlank() && username != userId) {
                 try { db.collection("users").document(username).delete().await() } catch (_: Exception) {}
             }
-            val authUid = doc.getString("authUid")
             if (!authUid.isNullOrBlank() && authUid != userId) {
                 try { db.collection("users").document(authUid).delete().await() } catch (_: Exception) {}
             }
+
+            // 2. Delete linked Enrollments permanently
+            try {
+                val studentEnrollments = db.collection("enrollments").whereEqualTo("studentId", userId).get().await()
+                for (enr in studentEnrollments.documents) {
+                    enr.reference.delete().await()
+                }
+                val teacherEnrollments = db.collection("enrollments").whereEqualTo("teacherId", userId).get().await()
+                for (enr in teacherEnrollments.documents) {
+                    enr.reference.delete().await()
+                }
+            } catch (e: Exception) {
+                Log.w("FirebaseManager", "Error deleting user enrollments: ${e.message}")
+            }
+
+            // 3. Delete 1-on-1 conversations & messages involving this user
+            try {
+                val convs = db.collection("conversations").whereArrayContains("participantIds", userId).get().await()
+                for (c in convs.documents) {
+                    val isGroup = c.getBoolean("isGroup") ?: false
+                    if (!isGroup) {
+                        deleteConversation(c.id)
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w("FirebaseManager", "Error deleting user conversations: ${e.message}")
+            }
+
+            // 4. If teacher, remove teacherId from subjects & timetable slots
+            if (roleStr.equals("TEACHER", ignoreCase = true)) {
+                try {
+                    val subjs = db.collection("subjects").whereEqualTo("teacherId", userId).get().await()
+                    for (s in subjs.documents) {
+                        s.reference.update(mapOf("teacherId" to "", "teacherName" to "")).await()
+                    }
+                    val slots = db.collection("timetable").whereEqualTo("teacherId", userId).get().await()
+                    for (slot in slots.documents) {
+                        slot.reference.delete().await()
+                    }
+                } catch (e: Exception) {
+                    Log.w("FirebaseManager", "Error unlinking teacher subjects: ${e.message}")
+                }
+            }
+
+            // Update in-memory state
             LocalDataStore.usersFlow.value = LocalDataStore.usersFlow.value.filter {
                 it.id != userId && (username == null || !it.username.equals(username, ignoreCase = true))
             }
+            LocalDataStore.enrollmentsFlow.value = LocalDataStore.enrollmentsFlow.value.filter {
+                it.studentId != userId && it.teacherId != userId
+            }
+            LocalDataStore.conversationsFlow.value = LocalDataStore.conversationsFlow.value.filter {
+                !it.participantIds.contains(userId)
+            }
+            LocalDataStore.timetableFlow.value = LocalDataStore.timetableFlow.value.filter {
+                it.teacherId != userId
+            }
+
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
@@ -985,6 +1049,38 @@ class FirebaseManager private constructor(private val context: Context) {
         }
     }
 
+    fun observeUser(userId: String): Flow<SchoolUser?> {
+        if (userId.isBlank()) return kotlinx.coroutines.flow.flowOf(null)
+        if (!isUsingCustomDatabase() || firestore == null) {
+            return LocalDataStore.usersFlow.map { list -> list.firstOrNull { it.id == userId } }
+        }
+        return callbackFlow {
+            val db = firestore
+            if (db == null) {
+                trySend(LocalDataStore.usersFlow.value.firstOrNull { it.id == userId })
+                close()
+                return@callbackFlow
+            }
+            val listener = db.collection("users").document(userId).addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    trySend(LocalDataStore.usersFlow.value.firstOrNull { it.id == userId })
+                    return@addSnapshotListener
+                }
+                val user = snapshot?.data?.let { SchoolUser.fromMap(snapshot.id, it) }
+                if (user != null) {
+                    LocalDataStore.usersFlow.value = LocalDataStore.usersFlow.value.map {
+                        if (it.id == user.id) user else it
+                    }
+                    if (currentUser?.id == user.id) {
+                        currentUser = user
+                    }
+                }
+                trySend(user)
+            }
+            awaitClose { listener.remove() }
+        }
+    }
+
     // ----------------------------------------------------
     // GROUPS, SUBJECTS & ROOMS
     // ----------------------------------------------------
@@ -1056,13 +1152,67 @@ class FirebaseManager private constructor(private val context: Context) {
             val id = "subj_${UUID.randomUUID().toString().take(8)}"
             val created = subject.copy(id = id)
             LocalDataStore.subjectsFlow.value = LocalDataStore.subjectsFlow.value + created
+            if (created.teacherId.isNotBlank()) {
+                val teacher = LocalDataStore.usersFlow.value.firstOrNull { it.id == created.teacherId }
+                if (teacher != null && !teacher.subjectIds.contains(id)) {
+                    updateUser(teacher.copy(subjectIds = teacher.subjectIds + id))
+                }
+            }
             return Result.success(id)
         }
         val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
         return try {
             val docRef = db.collection("subjects").document()
             docRef.set(subject.toMap()).await()
+            if (subject.teacherId.isNotBlank()) {
+                val teacher = LocalDataStore.usersFlow.value.firstOrNull { it.id == subject.teacherId }
+                if (teacher != null && !teacher.subjectIds.contains(docRef.id)) {
+                    updateUser(teacher.copy(subjectIds = teacher.subjectIds + docRef.id))
+                }
+            }
             Result.success(docRef.id)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun updateSubject(subject: Subject): Result<Unit> {
+        if (!isUsingCustomDatabase() || firestore == null) {
+            LocalDataStore.subjectsFlow.value = LocalDataStore.subjectsFlow.value.map {
+                if (it.id == subject.id) subject else it
+            }
+            if (subject.teacherId.isNotBlank()) {
+                val teacher = LocalDataStore.usersFlow.value.firstOrNull { it.id == subject.teacherId }
+                if (teacher != null && !teacher.subjectIds.contains(subject.id)) {
+                    updateUser(teacher.copy(subjectIds = teacher.subjectIds + subject.id))
+                }
+            }
+            return Result.success(Unit)
+        }
+        val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
+        return try {
+            db.collection("subjects").document(subject.id).set(subject.toMap()).await()
+            if (subject.teacherId.isNotBlank()) {
+                val teacher = LocalDataStore.usersFlow.value.firstOrNull { it.id == subject.teacherId }
+                if (teacher != null && !teacher.subjectIds.contains(subject.id)) {
+                    updateUser(teacher.copy(subjectIds = teacher.subjectIds + subject.id))
+                }
+            }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun deleteSubject(subjectId: String): Result<Unit> {
+        if (!isUsingCustomDatabase() || firestore == null) {
+            LocalDataStore.subjectsFlow.value = LocalDataStore.subjectsFlow.value.filter { it.id != subjectId }
+            return Result.success(Unit)
+        }
+        val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
+        return try {
+            db.collection("subjects").document(subjectId).delete().await()
+            Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
         }
@@ -1085,11 +1235,7 @@ class FirebaseManager private constructor(private val context: Context) {
                     return@addSnapshotListener
                 }
                 val list = snap.documents.map {
-                    Subject(
-                        id = it.id,
-                        name = it.getString("name") ?: "",
-                        code = it.getString("code") ?: ""
-                    )
+                    Subject.fromMap(it.id, it.data ?: emptyMap())
                 }
                 LocalDataStore.subjectsFlow.value = list
                 trySend(list)
@@ -1764,6 +1910,21 @@ class FirebaseManager private constructor(private val context: Context) {
             )
         }
         return res
+    }
+
+    suspend fun deleteEnrollment(enrollmentId: String): Result<Unit> {
+        if (!isUsingCustomDatabase() || firestore == null) {
+            LocalDataStore.enrollmentsFlow.value = LocalDataStore.enrollmentsFlow.value.filter { it.id != enrollmentId }
+            return Result.success(Unit)
+        }
+        val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
+        return try {
+            db.collection("enrollments").document(enrollmentId).delete().await()
+            LocalDataStore.enrollmentsFlow.value = LocalDataStore.enrollmentsFlow.value.filter { it.id != enrollmentId }
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 
     fun observeEnrollments(studentId: String? = null, teacherId: String? = null): Flow<List<Enrollment>> {
@@ -2453,11 +2614,48 @@ class FirebaseManager private constructor(private val context: Context) {
     suspend fun deleteConversation(conversationId: String): Result<Unit> {
         if (!isUsingCustomDatabase() || firestore == null) {
             LocalDataStore.conversationsFlow.value = LocalDataStore.conversationsFlow.value.filter { it.id != conversationId }
+            LocalDataStore.messagesMapFlow.value = LocalDataStore.messagesMapFlow.value - conversationId
             return Result.success(Unit)
         }
         val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
         return try {
             db.collection("conversations").document(conversationId).delete().await()
+            try {
+                val msgs = db.collection("conversations").document(conversationId).collection("messages").get().await()
+                for (m in msgs.documents) {
+                    m.reference.delete().await()
+                }
+            } catch (_: Exception) {}
+            LocalDataStore.conversationsFlow.value = LocalDataStore.conversationsFlow.value.filter { it.id != conversationId }
+            LocalDataStore.messagesMapFlow.value = LocalDataStore.messagesMapFlow.value - conversationId
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun cleanupDirectConversationBetween(userAId: String, userBId: String): Result<Unit> {
+        if (!isUsingCustomDatabase() || firestore == null) {
+            val toDelete = LocalDataStore.conversationsFlow.value.filter { conv ->
+                !conv.isGroup && conv.participantIds.contains(userAId) && conv.participantIds.contains(userBId)
+            }
+            toDelete.forEach { deleteConversation(it.id) }
+            return Result.success(Unit)
+        }
+        val db = firestore ?: return Result.failure(Exception("Firestore not initialized"))
+        return try {
+            val query = db.collection("conversations")
+                .whereEqualTo("isGroup", false)
+                .whereArrayContains("participantIds", userAId)
+                .get()
+                .await()
+            val matchDocs = query.documents.filter { doc ->
+                val parts = (doc.get("participantIds") as? List<*>)?.filterIsInstance<String>()
+                parts != null && parts.contains(userBId)
+            }
+            for (doc in matchDocs) {
+                deleteConversation(doc.id)
+            }
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)

@@ -270,6 +270,10 @@ fun AdminFinanceScreen(
                 scope.launch {
                     val res = firebaseManager.createEnrollment(enrollment)
                     if (res.isSuccess) {
+                        val student = students.firstOrNull { it.id == enrollment.studentId }
+                        if (student != null && !student.subjectIds.contains(enrollment.subjectId)) {
+                            firebaseManager.updateUser(student.copy(subjectIds = student.subjectIds + enrollment.subjectId))
+                        }
                         Toast.makeText(context, strings.save, Toast.LENGTH_SHORT).show()
                         showEnrollStudentDialog = false
                     } else {
@@ -1249,9 +1253,13 @@ fun EnrollStudentDialog(
     onSave: (Enrollment) -> Unit
 ) {
     var selectedStudent by remember { mutableStateOf(students.firstOrNull()) }
-    var selectedTeacher by remember { mutableStateOf(teachers.firstOrNull()) }
     var selectedSubject by remember { mutableStateOf(subjects.firstOrNull()) }
-    var feeText by remember { mutableStateOf("500") }
+    var selectedTeacher by remember(selectedSubject) {
+        mutableStateOf(teachers.firstOrNull { it.id == selectedSubject?.teacherId } ?: teachers.firstOrNull())
+    }
+    var feeText by remember(selectedSubject) {
+        mutableStateOf(if (selectedSubject != null && selectedSubject!!.price > 0) selectedSubject!!.price.toInt().toString() else "400")
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1276,12 +1284,12 @@ fun EnrollStudentDialog(
                     }
                 }
 
-                // Subject Picker
+                // Subject Picker (Shows Level and Price)
                 Text(strings.subjectsTitle, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                 var subjExp by remember { mutableStateOf(false) }
                 ExposedDropdownMenuBox(expanded = subjExp, onExpandedChange = { subjExp = it }) {
                     OutlinedTextField(
-                        value = selectedSubject?.name ?: "",
+                        value = selectedSubject?.displayName ?: "",
                         onValueChange = {},
                         readOnly = true,
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = subjExp) },
@@ -1289,7 +1297,16 @@ fun EnrollStudentDialog(
                     )
                     ExposedDropdownMenu(expanded = subjExp, onDismissRequest = { subjExp = false }) {
                         subjects.forEach { sb ->
-                            DropdownMenuItem(text = { Text(sb.name) }, onClick = { selectedSubject = sb; subjExp = false })
+                            DropdownMenuItem(
+                                text = { Text(sb.fullLabelWithPrice) },
+                                onClick = {
+                                    selectedSubject = sb
+                                    if (sb.price > 0) feeText = sb.price.toInt().toString()
+                                    val assignedT = teachers.firstOrNull { it.id == sb.teacherId }
+                                    if (assignedT != null) selectedTeacher = assignedT
+                                    subjExp = false
+                                }
+                            )
                         }
                     }
                 }
@@ -1328,14 +1345,14 @@ fun EnrollStudentDialog(
                     val s = selectedStudent
                     val sb = selectedSubject
                     val t = selectedTeacher
-                    val fee = feeText.toDoubleOrNull() ?: 500.0
+                    val fee = feeText.toDoubleOrNull() ?: 400.0
                     if (s != null && sb != null && t != null) {
                         onSave(
                             Enrollment(
                                 studentId = s.id,
                                 studentName = s.fullName,
                                 subjectId = sb.id,
-                                subjectName = sb.name,
+                                subjectName = sb.displayName,
                                 teacherId = t.id,
                                 teacherName = t.fullName,
                                 monthlyFee = fee,

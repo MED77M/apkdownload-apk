@@ -55,6 +55,41 @@ fun ChatListScreen(
     var selectedTab by remember { mutableStateOf(0) } // 0: All, 1: Private, 2: Groups, 3: Requests
     var showNewChatDialog by remember { mutableStateOf(false) }
     var showCreateGroupDialog by remember { mutableStateOf(false) }
+    var conversationToDelete by remember { mutableStateOf<ChatConversation?>(null) }
+
+    // Admin Delete Conversation Dialog
+    if (conversationToDelete != null && currentUser.role == Role.ADMIN) {
+        val conv = conversationToDelete!!
+        AlertDialog(
+            onDismissRequest = { conversationToDelete = null },
+            title = { Text("حذف المحادثة نهائياً", fontWeight = FontWeight.Bold) },
+            text = { Text("هل أنت متأكد من حذف محادثة \"${conv.name.ifEmpty { "المحادثة" }}\" نهائياً؟ سيتم مسح جميع الرسائل والوسائط.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val cid = conv.id
+                        conversationToDelete = null
+                        scope.launch {
+                            val res = firebaseManager.deleteConversation(cid)
+                            if (res.isSuccess) {
+                                Toast.makeText(context, "تم حذف المحادثة بنجاح", Toast.LENGTH_SHORT).show()
+                            } else {
+                                Toast.makeText(context, "${strings.error}: ${res.exceptionOrNull()?.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text(strings.delete, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { conversationToDelete = null }) {
+                    Text(strings.cancel)
+                }
+            }
+        )
+    }
 
     // Pending incoming requests for the current user
     val pendingIncomingRequests = remember(conversations, currentUser) {
@@ -311,6 +346,22 @@ fun ChatListScreen(
                                             Text("$unreadCount")
                                         }
                                     }
+
+                                    // Admin-only Delete Conversation Action Button
+                                    if (currentUser.role == Role.ADMIN) {
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        IconButton(
+                                            onClick = { conversationToDelete = conv },
+                                            modifier = Modifier.size(36.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.DeleteOutline,
+                                                contentDescription = "حذف المحادثة",
+                                                tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    }
                                 }
 
                                 // Quick Accept / Decline actions if this is an incoming request
@@ -537,13 +588,24 @@ private fun NewChatModalDialog(
                     }
 
                     if (selectedStudentTab == 0) {
-                        // Directly list Teachers & Admin
-                        val teachersAndAdmins = remember(allUsers) {
-                            allUsers.filter { (it.role == Role.TEACHER || it.role == Role.ADMIN) && it.isActive }
+                        // Directly list Teachers of enrolled subjects & Admin for student
+                        val teachersAndAdmins = remember(allUsers, enrollments, currentUser) {
+                            val myTeacherIds = enrollments.filter { it.studentId == currentUser.id }.map { it.teacherId }.filter { it.isNotBlank() }.toSet()
+                            val mySubjectTeacherIds = currentUser.subjectIds.mapNotNull { sId ->
+                                allUsers.firstOrNull { it.role == Role.TEACHER && it.subjectIds.contains(sId) }?.id
+                            }.toSet()
+                            val validTeacherIds = myTeacherIds + mySubjectTeacherIds
+
+                            allUsers.filter { user ->
+                                user.isActive && (
+                                    user.role == Role.ADMIN ||
+                                    (user.role == Role.TEACHER && validTeacherIds.contains(user.id))
+                                )
+                            }
                         }
                         if (teachersAndAdmins.isEmpty()) {
                             Text(
-                                "لا يوجد أساتذة مسجلون حالياً",
+                                "لا يوجد أساتذة مسجلون في موادك حالياً. تواصل مع إدارة المدرسة.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(16.dp)
